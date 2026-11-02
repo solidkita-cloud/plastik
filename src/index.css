@@ -1,0 +1,57 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+    scroll-behavior: smooth;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
+  }
+}
+
+/* Custom Neo-Brutalist & Packaging Badges */
+.neo-border {
+  border: 2px solid #0F172A;
+}
+
+.neo-border-thick {
+  border: 2.5px solid #0F172A;
+}
+
+.neo-shadow {
+  box-shadow: 4px 4px 0px #0F172A;
+}
+
+.neo-shadow-lg {
+  box-shadow: 6px 6px 0px #0F172A;
+}
+
+.neo-shadow-sm {
+  box-shadow: 2px 2px 0px #0F172A;
+}
+
+.neo-shadow-primary {
+  box-shadow: 4px 4px 0px #0284C7;
+}
+
+.neo-shadow-accent {
+  box-shadow: 4px 4px 0px #EA580C;
+}
+
+.neo-shadow-eco {
+  box-shadow: 4px 4px 0px #059669;
+}
+
+/* Hide scrollbars for horizontal tab scrolling */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
