@@ -22,19 +22,24 @@ import { OwnerDashboard } from './components/OwnerDashboard';
 import { MobileNav } from './components/MobileNav';
 import { InfoModal } from './components/InfoModal';
 import { Toast } from './components/Toast';
+import { AddProductModal } from './components/AddProductModal';
+import { StarterBundleModal } from './components/StarterBundleModal';
 
-import { INITIAL_PRODUCTS, CATEGORIES, STORE_INFO } from './lib/constants';
+import { CATEGORIES, STORE_INFO } from './lib/constants';
 import { initCatalogIndex } from './lib/catalogDb';
 import { Product } from './types';
 import { useCartStore } from './stores/cartStore';
+import { useCatalogStore } from './stores/catalogStore';
 
 export const App: React.FC = () => {
-  const [products] = useState<Product[]>(INITIAL_PRODUCTS);
+  const products = useCatalogStore((state) => state.products);
   const [activeCategory, setActiveCategory] = useState('cat_all');
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isQRModalOpen, setIsQRModalOpen] = useState(false);
   const [isOwnerModalOpen, setIsOwnerModalOpen] = useState(false);
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [isBundleModalOpen, setIsBundleModalOpen] = useState(false);
   const [infoModalType, setInfoModalType] = useState<'about' | 'help' | 'promo' | null>(null);
   const [mobileTab, setMobileTab] = useState('beranda');
 
@@ -49,8 +54,8 @@ export const App: React.FC = () => {
 
   // Initialize IndexedDB fast search index on mount
   useEffect(() => {
-    initCatalogIndex(INITIAL_PRODUCTS);
-  }, []);
+    initCatalogIndex(products);
+  }, [products]);
 
   // Filter products by category AND search query
   const filteredProducts = products.filter((p) => {
@@ -90,6 +95,7 @@ export const App: React.FC = () => {
         onOpenQR={() => setIsQRModalOpen(true)}
         onOpenCart={() => setIsCartOpen(true)}
         onOpenOwner={() => setIsOwnerModalOpen(true)}
+        onOpenBundle={() => setIsBundleModalOpen(true)}
         onOpenInfo={(type) => setInfoModalType(type)}
         onSearchSubmit={(q) => setSearchFilter(q)}
         onSelectProductItem={(prodId) => {
@@ -110,6 +116,36 @@ export const App: React.FC = () => {
 
         {/* 3. Trust Badges Row (Produk Berkualitas, Harga Terbaik, Pengiriman Cepat, dll) */}
         <TrustBadges />
+
+        {/* 3.5. Starter Pack Usaha Kuliner Highlight Banner */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 rounded-2xl p-4 sm:p-5 neo-border-thick text-white shadow-hard flex flex-col md:flex-row items-center justify-between gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
+              <div className="w-12 h-12 sm:w-14 sm:h-14 rounded-2xl bg-white text-slate-900 flex items-center justify-center font-black text-2xl sm:text-3xl neo-border shrink-0 shadow-sm">
+                🎁
+              </div>
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/20 text-white text-[11px] font-extrabold uppercase tracking-wider mb-1">
+                  <span>✨ Fitur Unggulan Mitra Baru</span>
+                  <span>•</span>
+                  <span>Hemat s/d 15%</span>
+                </div>
+                <h3 className="font-display font-black text-lg sm:text-xl text-white">
+                  Paket Starter Usaha Kuliner (Kedai Kopi, Rice Bowl & Bakery)
+                </h3>
+                <p className="text-xs sm:text-sm text-amber-100 font-medium">
+                  Bundling kemasan lengkap siap pakai dalam 1-klik dengan potongan harga langsung.
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsBundleModalOpen(true)}
+              className="px-5 py-3 bg-white hover:bg-slate-100 text-slate-900 font-black text-xs sm:text-sm rounded-xl neo-border shadow-hard-sm transition-all whitespace-nowrap active:translate-x-0.5 active:translate-y-0.5 hover:shadow-none"
+            >
+              Lihat Paket Starter Usaha →
+            </button>
+          </div>
+        </div>
 
         {/* 4. Section Produk Unggulan & Katalog */}
         <section id="katalog-section" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
@@ -367,6 +403,31 @@ export const App: React.FC = () => {
       <OwnerDashboard
         isOpen={isOwnerModalOpen}
         onClose={() => setIsOwnerModalOpen(false)}
+        onOpenAddProduct={() => {
+          setIsOwnerModalOpen(false);
+          setIsAddProductOpen(true);
+        }}
+      />
+
+      {/* Visual Add Product Modal (Owner / Admin Form) */}
+      <AddProductModal
+        isOpen={isAddProductOpen}
+        onClose={() => setIsAddProductOpen(false)}
+        onSuccess={(productName) => {
+          setIsAddProductOpen(false);
+          showToastNotification(`Produk "${productName}" berhasil ditambahkan ke katalog!`);
+        }}
+      />
+
+      {/* Culinary Starter Bundling Modal */}
+      <StarterBundleModal
+        isOpen={isBundleModalOpen}
+        onClose={() => setIsBundleModalOpen(false)}
+        onOpenCart={() => {
+          setIsBundleModalOpen(false);
+          setIsCartOpen(true);
+        }}
+        onShowToast={showToastNotification}
       />
 
       {/* Info Modal (About / Help / Promo) */}

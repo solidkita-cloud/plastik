@@ -22,6 +22,7 @@ interface HeaderProps {
   onOpenQR: () => void;
   onOpenCart: () => void;
   onOpenOwner: () => void;
+  onOpenBundle?: () => void;
   onSelectCategory: (categoryId: string) => void;
   activeCategory: string;
   onSelectProductItem?: (productId: string) => void;
@@ -33,6 +34,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenQR,
   onOpenCart,
   onOpenOwner,
+  onOpenBundle,
   onSelectCategory,
   activeCategory,
   onSelectProductItem,
@@ -314,6 +316,15 @@ export const Header: React.FC<HeaderProps> = ({
                 <Sparkles className="w-3 h-3 text-amber-300" />
                 <span>Smart Re-Order</span>
               </button>
+
+              {onOpenBundle && (
+                <button
+                  onClick={onOpenBundle}
+                  className="px-3 py-1.5 rounded-lg bg-amber-400 hover:bg-amber-300 text-slate-900 font-extrabold transition-colors flex items-center gap-1 shadow-sm"
+                >
+                  <span>🎁 Paket Usaha</span>
+                </button>
+              )}
 
               <button
                 onClick={() => onOpenInfo('help')}

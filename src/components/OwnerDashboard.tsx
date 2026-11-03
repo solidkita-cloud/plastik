@@ -12,21 +12,34 @@ import {
   TestTube, 
   Play, 
   CheckCircle2, 
-  Sparkles
+  Sparkles,
+  Plus,
+  Trash2,
+  RotateCcw
 } from 'lucide-react';
-import { INITIAL_PRODUCTS, DEMO_CUSTOMERS } from '../lib/constants';
+import { DEMO_CUSTOMERS } from '../lib/constants';
 import { generateVerificationChecksum } from '../lib/security';
 import { searchFlatCatalog } from '../lib/catalogDb';
+import { useCatalogStore } from '../stores/catalogStore';
 
 interface OwnerDashboardProps {
   isOpen: boolean;
   onClose: () => void;
+  onOpenAddProduct: () => void;
 }
 
-export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ isOpen, onClose }) => {
+export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ 
+  isOpen, 
+  onClose,
+  onOpenAddProduct 
+}) => {
   const [pin, setPin] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [activeTab, setActiveTab] = useState<'agents' | 'verify' | 'inventory' | 'customers' | 'stickers'>('agents');
+  const [activeTab, setActiveTab] = useState<'agents' | 'inventory' | 'verify' | 'customers' | 'stickers'>('inventory');
+
+  const products = useCatalogStore((state) => state.products);
+  const deleteProduct = useCatalogStore((state) => state.deleteProduct);
+  const resetDefaultCatalog = useCatalogStore((state) => state.resetDefaultCatalog);
 
   // Checksum verification state
   const [inputCode, setInputCode] = useState('');
@@ -140,10 +153,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ isOpen, onClose 
             </div>
             <div>
               <h3 className="font-display font-black text-lg text-ink">
-                Dashboard Pemilik & Konsol Multi-Agen
+                Dashboard Pemilik & Kasir Gudang
               </h3>
               <p className="text-[11px] text-slate-500 font-semibold">
-                PlastiPro Management & Multi-Agent Control
+                PlastiPro Management & Multi-Agent Console
               </p>
             </div>
           </div>
@@ -166,7 +179,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ isOpen, onClose 
               Masukkan PIN Kasir
             </h4>
             <p className="text-xs text-slate-500 mb-6">
-              Mode ini untuk verifikasi checksum pesanan WA dan konsol agen. PIN demo: <strong className="text-primary font-mono">1234</strong>
+              Kelola produk, varian, stiker kardus & konsol agen. PIN demo: <strong className="text-primary font-mono">1234</strong>
             </p>
 
             <form onSubmit={handleLogin} className="space-y-4">
@@ -192,6 +205,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ isOpen, onClose 
             {/* Authenticated Tabs */}
             <div className="flex border-b border-slate-200 bg-slate-100 text-xs font-bold overflow-x-auto no-scrollbar">
               <button
+                onClick={() => setActiveTab('inventory')}
+                className={`py-3 px-4 transition-colors flex items-center gap-1.5 shrink-0 ${
+                  activeTab === 'inventory' ? 'bg-white text-primary border-b-2 border-primary font-black' : 'text-slate-600 hover:text-ink'
+                }`}
+              >
+                <Package className="w-4 h-4" />
+                <span>Katalog & Produk ({products.length})</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('agents')}
                 className={`py-3 px-4 transition-colors flex items-center gap-1.5 shrink-0 ${
                   activeTab === 'agents' ? 'bg-white text-primary border-b-2 border-primary font-black' : 'text-slate-600 hover:text-ink'
@@ -209,16 +232,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ isOpen, onClose 
               >
                 <ShieldCheck className="w-4 h-4" />
                 <span>Validasi Checksum WA</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('inventory')}
-                className={`py-3 px-4 transition-colors flex items-center gap-1.5 shrink-0 ${
-                  activeTab === 'inventory' ? 'bg-white text-primary border-b-2 border-primary font-black' : 'text-slate-600 hover:text-ink'
-                }`}
-              >
-                <Package className="w-4 h-4" />
-                <span>Stok & Varian ({INITIAL_PRODUCTS.length})</span>
               </button>
 
               <button
@@ -245,6 +258,98 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ isOpen, onClose 
             {/* Tab Content */}
             <div className="p-5 overflow-y-auto space-y-4">
               
+              {/* Tab: Manajemen Produk & Stok */}
+              {activeTab === 'inventory' && (
+                <div className="space-y-4">
+                  {/* Action Bar */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3 bg-sky-50 rounded-xl neo-border border-sky-200">
+                    <div>
+                      <h4 className="font-extrabold text-sm text-ink">
+                        Manajemen Produk & Satuan Grosir
+                      </h4>
+                      <p className="text-[11px] text-slate-600">
+                        Total {products.length} produk aktif di katalog toko.
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={onOpenAddProduct}
+                        className="py-2 px-3.5 bg-accent hover:bg-accent-dark text-white rounded-xl text-xs font-black neo-border shadow-sm flex items-center gap-1.5 transition-all active:scale-95"
+                      >
+                        <Plus className="w-4 h-4" />
+                        <span>+ Tambah Produk Baru</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          if (confirm('Yakin ingin mereset katalog ke pengaturan awal default?')) {
+                            resetDefaultCatalog();
+                          }
+                        }}
+                        className="p-2 bg-white hover:bg-slate-100 text-slate-600 rounded-xl text-xs font-bold border border-slate-300"
+                        title="Reset ke default"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* List of Products */}
+                  <div className="space-y-2 max-h-96 overflow-y-auto">
+                    {products.map((prod) => (
+                      <div
+                        key={prod.id}
+                        className="p-3 bg-white rounded-xl neo-border flex items-center justify-between gap-3 hover:bg-slate-50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-12 h-12 rounded-lg bg-slate-100 border border-slate-200 p-1 shrink-0 flex items-center justify-center">
+                            <img
+                              src={prod.image_url}
+                              alt={prod.name}
+                              className="max-h-full max-w-full object-contain"
+                            />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-extrabold text-xs sm:text-sm text-ink truncate">
+                                {prod.name}
+                              </span>
+                              {prod.badge && (
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-accent text-white">
+                                  {prod.badge}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              {prod.variants.length} ukuran varian • Bahan {prod.material}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md text-[10px] font-bold">
+                            Ready
+                          </span>
+
+                          <button
+                            onClick={() => {
+                              if (confirm(`Hapus produk "${prod.name}" dari katalog?`)) {
+                                deleteProduct(prod.id);
+                              }
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition-colors"
+                            title="Hapus Produk"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Tab: Konsol Multi-Agen (Manager, Desain, Tester) */}
               {activeTab === 'agents' && (
                 <div className="space-y-4">
@@ -433,33 +538,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({ isOpen, onClose 
                       </div>
                     </div>
                   )}
-                </div>
-              )}
-
-              {/* Tab: Stok & Varian */}
-              {activeTab === 'inventory' && (
-                <div className="space-y-3">
-                  <p className="text-xs text-slate-500">
-                    Daftar produk aktif dengan status ketersediaan di gudang fisik:
-                  </p>
-                  <div className="space-y-2 max-h-80 overflow-y-auto">
-                    {INITIAL_PRODUCTS.map((prod) => (
-                      <div
-                        key={prod.id}
-                        className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between"
-                      >
-                        <div>
-                          <div className="font-extrabold text-xs sm:text-sm text-ink">{prod.name}</div>
-                          <div className="text-[11px] text-slate-500">
-                            {prod.variants.length} varian ukuran • Bahan {prod.material}
-                          </div>
-                        </div>
-                        <span className="px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-300">
-                          Ready Stock
-                        </span>
-                      </div>
-                    ))}
-                  </div>
                 </div>
               )}
 

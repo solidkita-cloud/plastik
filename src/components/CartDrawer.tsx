@@ -10,11 +10,13 @@ import {
   Send, 
   ShieldCheck, 
   UserCheck,
-  Scale
+  Scale,
+  FileDown
 } from 'lucide-react';
 import { useCartStore } from '../stores/cartStore';
 import { STORE_INFO } from '../lib/constants';
 import { sanitizeNote, generateVerificationChecksum } from '../lib/security';
+import { generateInvoicePDF } from '../lib/pdfGenerator';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -48,6 +50,17 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
   const subtotal = getSubtotal();
   const totalQty = getTotalQty();
   const totalWeightKg = getTotalWeightKg();
+
+  // Smart Logistics Calculation (Motor vs Mobil MPV vs Lalamove / Kargo)
+  let logisticsRecommendation = '🛵 Muat Kurir Motor (Gojek / Grab / Maxim)';
+  const hasDus = items.some((i) => i.unit_code === 'DUS');
+  const dusCount = items.filter((i) => i.unit_code === 'DUS').reduce((acc, curr) => acc + curr.qty, 0);
+
+  if (totalWeightKg > 20 || dusCount >= 3) {
+    logisticsRecommendation = '🚐 Rekomendasi: Lalamove Van / Pick-up / Kargo Dakota (Muatan Bal/Dus Besar)';
+  } else if (totalWeightKg > 7 || hasDus) {
+    logisticsRecommendation = '🛺 Rekomendasi: GrabExpress Car / Motor Tossa Roda Tiga (Barang Sedang)';
+  }
 
   const handleSendToWhatsApp = async () => {
     if (items.length === 0) return;
@@ -117,6 +130,37 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
     }
   };
 
+  const handleDownloadInvoice = async () => {
+    if (items.length === 0) return;
+    const orderNumber = `TP-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const checksumData = {
+      order_number: orderNumber,
+      items: items.map((i) => ({ sku: i.sku, qty: i.qty, price: i.price })),
+      subtotal,
+      deliveryMethod,
+      token: customer?.qr_token || 'guest'
+    };
+    const { code } = await generateVerificationChecksum(checksumData);
+
+    const deliveryLabels: Record<string, string> = {
+      pickup: 'Ambil di Toko Fisik',
+      instant: 'Kurir Instan Lokal',
+      kargo: 'Ekspedisi Kargo Bal'
+    };
+
+    generateInvoicePDF({
+      orderNumber,
+      customerName: customer?.business_name || guestName || 'Pelanggan Toko Plastik',
+      customerPhone: customer?.phone_number || guestPhone || '-',
+      deliveryMethod: deliveryLabels[deliveryMethod] || 'Kurir Toko',
+      deliveryAddress: customer?.delivery_address || guestAddress || '-',
+      items,
+      subtotal,
+      totalWeightKg,
+      verificationCode: code
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-ink/70 backdrop-blur-sm animate-fadeIn">
       <div className="absolute inset-y-0 right-0 max-w-full flex pl-10">
@@ -147,7 +191,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
           </div>
 
           {/* Drawer Body (Scrollable) */}
-          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5">
+          <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
             
             {/* Customer Status Banner */}
             {customer ? (
@@ -186,6 +230,14 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
                 <span className="text-xs font-black text-primary underline">
                   Scan QR
                 </span>
+              </div>
+            )}
+
+            {/* Smart Logistics Suggestion Card */}
+            {items.length > 0 && (
+              <div className="p-2.5 bg-gradient-to-r from-amber-50 to-orange-50 rounded-xl border border-amber-300 text-xs font-bold text-amber-900 flex items-center gap-2">
+                <Scale className="w-4 h-4 text-accent shrink-0" />
+                <span className="leading-tight">{logisticsRecommendation}</span>
               </div>
             )}
 
@@ -370,11 +422,11 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
 
           </div>
 
-          {/* Drawer Footer (Summary & WhatsApp Trigger) */}
+          {/* Drawer Footer (Summary, WhatsApp & PDF Download) */}
           {items.length > 0 && (
             <div className="p-4 sm:p-5 border-t-2 border-ink bg-slate-50 space-y-3">
               {/* Weight & Total Summary */}
-              <div className="space-y-1.5 text-xs">
+              <div className="space-y-1 text-xs">
                 <div className="flex items-center justify-between text-slate-600">
                   <span>Estimasi Berat Barang:</span>
                   <span className="font-bold text-ink">± {totalWeightKg} Kg</span>
@@ -393,15 +445,26 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
                 <span>Terverifikasi Kriptografis (Anti-Manipulasi Harga)</span>
               </div>
 
-              {/* Send to WhatsApp CTA */}
-              <button
-                onClick={handleSendToWhatsApp}
-                disabled={isSubmitting}
-                className="w-full py-3.5 px-4 bg-accent hover:bg-accent-dark text-white rounded-xl font-extrabold text-sm sm:text-base neo-border-thick neo-shadow-accent flex items-center justify-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5"
-              >
-                <Send className="w-4 h-4" />
-                <span>Kirim Pesanan ke WhatsApp</span>
-              </button>
+              {/* Action Buttons: WhatsApp & PDF Invoice */}
+              <div className="space-y-2">
+                <button
+                  onClick={handleSendToWhatsApp}
+                  disabled={isSubmitting}
+                  className="w-full py-3.5 px-4 bg-accent hover:bg-accent-dark text-white rounded-xl font-extrabold text-sm sm:text-base neo-border-thick neo-shadow-accent flex items-center justify-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Kirim Pesanan ke WhatsApp</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadInvoice}
+                  className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-slate-700 rounded-xl font-bold text-xs neo-border flex items-center justify-center gap-1.5 transition-all"
+                >
+                  <FileDown className="w-4 h-4 text-primary" />
+                  <span>Cetak / Unduh Nota Struk PDF</span>
+                </button>
+              </div>
             </div>
           )}
 
