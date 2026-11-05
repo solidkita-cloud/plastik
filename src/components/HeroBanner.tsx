@@ -74,58 +74,35 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({ onOrderClick }) => {
             <div className="relative mx-auto max-w-md lg:max-w-none">
               
               {/* Callout Bubble matching Mockup: "Kemasan Lebih Higienis!" */}
-              <div className="absolute -top-3 -left-2 sm:-left-4 z-20 bg-white px-3.5 py-1.5 rounded-xl neo-border shadow-hard text-xs sm:text-sm font-extrabold text-primary flex items-center gap-1.5 -rotate-2">
+              <div className="absolute -top-3.5 -left-2 sm:-left-4 z-20 bg-white px-4 py-2 rounded-xl neo-border shadow-hard text-xs sm:text-sm font-black text-primary flex items-center gap-1.5 -rotate-2 select-none animate-bounce-slow">
                 <span className="text-base">✨</span>
                 <span>Kemasan Lebih Higienis!</span>
               </div>
 
-              {/* Main Card with Packaging Illustration */}
-              <div className="bg-white rounded-2xl neo-border-thick shadow-hard p-4 sm:p-6 relative overflow-hidden bg-gradient-to-br from-white via-sky-50/40 to-amber-50/30">
-                <div className="grid grid-cols-2 gap-3 items-center">
-                  
-                  {/* Thinwall Containers Preview */}
-                  <div className="space-y-2">
-                    <div className="p-3 bg-sky-50 rounded-xl neo-border border-slate-300 text-center">
-                      <div className="w-12 h-12 mx-auto bg-primary/10 rounded-lg flex items-center justify-center text-primary font-bold text-xs mb-1">
-                        500-1000ml
-                      </div>
-                      <span className="font-extrabold text-xs text-ink block">Thinwall Box</span>
-                      <span className="text-[10px] text-eco font-bold">Microwave Safe</span>
-                    </div>
-
-                    <div className="p-3 bg-amber-50 rounded-xl neo-border border-slate-300 text-center">
-                      <div className="w-12 h-12 mx-auto bg-amber-500/10 rounded-lg flex items-center justify-center text-accent font-bold text-xs mb-1">
-                        Kraft
-                      </div>
-                      <span className="font-extrabold text-xs text-ink block">Paper Lunch Box</span>
-                      <span className="text-[10px] text-slate-500 font-semibold">Food Grade</span>
-                    </div>
-                  </div>
-
-                  {/* Cup & Bag Preview */}
-                  <div className="space-y-2">
-                    <div className="p-3 bg-emerald-50 rounded-xl neo-border border-slate-300 text-center">
-                      <div className="w-12 h-12 mx-auto bg-eco/10 rounded-lg flex items-center justify-center text-eco font-bold text-xs mb-1">
-                        12-22 oz
-                      </div>
-                      <span className="font-extrabold text-xs text-ink block">Cup Minuman PP</span>
-                      <span className="text-[10px] text-primary font-bold">Bisa Sealer Roll</span>
-                    </div>
-
-                    <div className="p-3 bg-purple-50 rounded-xl neo-border border-slate-300 text-center">
-                      <div className="w-12 h-12 mx-auto bg-purple-500/10 rounded-lg flex items-center justify-center text-purple-700 font-bold text-xs mb-1">
-                        HDPE
-                      </div>
-                      <span className="font-extrabold text-xs text-ink block">Kresek Bening</span>
-                      <span className="text-[10px] text-slate-500 font-semibold">Kuat & Ulet</span>
-                    </div>
-                  </div>
-
+              {/* Main Commercial Packaging Photo Container */}
+              <div className="bg-white rounded-3xl neo-border-thick shadow-hard-lg overflow-hidden relative group">
+                <div className="relative pt-[70%] sm:pt-[65%] w-full bg-slate-50 overflow-hidden">
+                  <img
+                    src="/products/hero-packaging-group.jpg"
+                    alt="Koleksi Kemasan Plastik & Paper PlastiPro"
+                    className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/60 via-transparent to-transparent pointer-events-none" />
                 </div>
 
-                {/* Footer badge on visual */}
-                <div className="mt-3 text-center bg-primary text-white py-1.5 px-3 rounded-lg text-[11px] font-bold">
-                  Tersedia Eceran, Per Pack, Bal & Dus Pabrik
+                {/* Floating Micro Badges on Photo */}
+                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-[11px] font-extrabold text-white">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-1 rounded-lg bg-eco/90 backdrop-blur-sm neo-border border-white/60 shadow-sm">
+                      🌱 Food Grade & Eco
+                    </span>
+                    <span className="hidden sm:inline-block px-2.5 py-1 rounded-lg bg-primary/90 backdrop-blur-sm neo-border border-white/60 shadow-sm">
+                      🔥 Tahan Panas & Dingin
+                    </span>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-lg bg-black/60 backdrop-blur-sm border border-white/40">
+                    Ecer & Grosir Dus
+                  </span>
                 </div>
               </div>
 

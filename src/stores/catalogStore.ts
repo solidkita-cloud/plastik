@@ -19,7 +19,14 @@ function loadInitialCatalog(): Product[] {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        return parsed;
+        // Upgrade legacy SVG data strings to high-res realistic product images
+        return parsed.map((p: Product) => {
+          const defaultMatch = INITIAL_PRODUCTS.find((init) => init.id === p.id);
+          if (defaultMatch && (p.image_url?.startsWith('data:image/svg') || !p.image_url)) {
+            return { ...p, image_url: defaultMatch.image_url };
+          }
+          return p;
+        });
       }
     }
   } catch (err) {

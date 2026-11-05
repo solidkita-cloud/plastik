@@ -7,36 +7,39 @@ interface EcoBannerProps {
 
 export const EcoBanner: React.FC<EcoBannerProps> = ({ onFilterEco }) => {
   return (
-    <div className="bg-gradient-to-br from-emerald-100 via-emerald-50 to-teal-50 rounded-2xl neo-border shadow-hard p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden">
-      {/* Decorative background element */}
-      <div className="absolute -right-6 -bottom-6 w-32 h-32 bg-eco/10 rounded-full blur-xl pointer-events-none" />
+    <div className="bg-gradient-to-br from-emerald-50 via-teal-50 to-sky-50 rounded-2xl neo-border shadow-hard p-5 sm:p-6 flex flex-col justify-between relative overflow-hidden group">
+      {/* Tote bag photo in bottom right matching mockup */}
+      <div className="absolute -right-4 -bottom-4 w-32 h-32 sm:w-36 sm:h-36 pointer-events-none opacity-85 group-hover:scale-110 transition-transform duration-300">
+        <img
+          src="/products/eco-bag.jpg"
+          alt="Tas Kantong Ramah Lingkungan"
+          className="w-full h-full object-contain drop-shadow-md rounded-2xl"
+        />
+      </div>
 
-      <div>
-        <div className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-eco text-white text-[11px] font-extrabold uppercase tracking-wider mb-3">
-          <Leaf className="w-3.5 h-3.5" />
-          <span>Biodegradable</span>
+      <div className="relative z-10">
+        <div className="w-10 h-10 rounded-xl bg-eco/10 border border-eco/30 flex items-center justify-center text-eco mb-3 shadow-sm">
+          <Leaf className="w-5 h-5 text-eco fill-eco/30" />
         </div>
 
-        <h3 className="font-display font-black text-xl sm:text-2xl text-emerald-950 leading-tight mb-2">
+        <h3 className="font-display font-black text-xl sm:text-2xl text-ink leading-tight mb-2">
           Kemasan Ramah <br />
-          <span className="text-eco-dark">Lingkungan</span>
+          <span className="text-eco">Lingkungan</span>
         </h3>
 
-        <p className="text-xs sm:text-sm text-emerald-900/80 font-medium mb-4">
-          Dukung bisnis hijau & tingkatkan citra kuliner Anda bersama pilihan kemasan ramah alam PlastiPro.
+        <p className="text-xs sm:text-sm text-slate-600 font-medium mb-4 max-w-[200px]">
+          Dukung bisnis hijau bersama PlastiPro dengan kemasan alami mudah terurai.
         </p>
       </div>
 
-      <div className="mt-4 pt-3 border-t border-emerald-200/60 flex items-center justify-between">
+      <div className="relative z-10 mt-6 pt-3 border-t border-emerald-200/50">
         <button
           onClick={onFilterEco}
-          className="py-2.5 px-5 bg-eco hover:bg-eco-dark text-white rounded-xl text-xs sm:text-sm font-extrabold flex items-center gap-2 neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 shadow-sm"
+          className="py-2.5 px-6 bg-eco hover:bg-eco-dark text-white rounded-xl text-xs sm:text-sm font-black flex items-center gap-2 neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 shadow-sm hover:shadow-none"
         >
-          <span>Jelajahi Produk Eco</span>
+          <span>Go Green</span>
           <ArrowRight className="w-4 h-4" />
         </button>
-
-        <span className="text-2xl">🌱</span>
       </div>
     </div>
   );
