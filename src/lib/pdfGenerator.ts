@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { CartItem } from '../types';
-import { STORE_INFO } from './constants';
+import { useSettingsStore } from '../stores/settingsStore';
 
 export interface InvoiceData {
   orderNumber: string;
@@ -15,6 +15,12 @@ export interface InvoiceData {
 }
 
 export function generateInvoicePDF(data: InvoiceData) {
+  const settings = useSettingsStore.getState();
+  const storeName = settings.storeName.toUpperCase();
+  const tagline = settings.tagline;
+  const phone = settings.phoneDisplay;
+  const address = settings.address;
+
   const doc = new jsPDF({
     orientation: 'portrait',
     unit: 'mm',
@@ -31,12 +37,12 @@ export function generateInvoicePDF(data: InvoiceData) {
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(20);
-  doc.text('PLASTIPRO INDONESIA', 15, 12);
+  doc.text(storeName, 15, 12);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
-  doc.text('Pusat Grosir & Eceran Plastik, Thinwall & Kemasan UMKM Kuliner', 15, 18);
-  doc.text(`WA: ${STORE_INFO.phoneDisplay} | ${STORE_INFO.address}`, 15, 23);
+  doc.text(tagline, 15, 18);
+  doc.text(`WA: ${phone} | ${address}`, 15, 23);
 
   // 2. Invoice Meta Info
   doc.setTextColor(darkInk[0], darkInk[1], darkInk[2]);
@@ -119,12 +125,12 @@ export function generateInvoicePDF(data: InvoiceData) {
   doc.text('( .................................... )', 20, signY + 20);
 
   doc.text('Kasir / Bagian Gudang,', 145, signY);
-  doc.text('( PLASTIPRO SIDOARJO )', 140, signY + 20);
+  doc.text(`( ${storeName} )`, 140, signY + 20);
 
   // Footer Note
   doc.setFontSize(7.5);
   doc.setTextColor(100, 100, 100);
-  doc.text('Barang yang sudah dibeli dapat ditukar jika ada cacat pabrik maksimal 2 hari setelah barang diterima.', 15, 280);
+  doc.text(settings.thermalFooterNote, 15, 280);
 
   // Save to file
   doc.save(`Nota-${data.orderNumber}.pdf`);

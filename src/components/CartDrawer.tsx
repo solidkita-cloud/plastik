@@ -11,12 +11,14 @@ import {
   ShieldCheck, 
   UserCheck,
   Scale,
-  FileDown
+  FileDown,
+  Printer
 } from 'lucide-react';
 import { useCartStore } from '../stores/cartStore';
-import { STORE_INFO } from '../lib/constants';
+import { useSettingsStore } from '../stores/settingsStore';
 import { sanitizeNote, generateVerificationChecksum } from '../lib/security';
 import { generateInvoicePDF } from '../lib/pdfGenerator';
+import { ThermalReceiptModal } from './ThermalReceiptModal';
 
 interface CartDrawerProps {
   isOpen: boolean;
@@ -25,6 +27,8 @@ interface CartDrawerProps {
 }
 
 export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQR }) => {
+  const storeSettings = useSettingsStore();
+
   const items = useCartStore((state) => state.items);
   const updateQty = useCartStore((state) => state.updateQty);
   const removeItem = useCartStore((state) => state.removeItem);
@@ -44,6 +48,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
   const [guestPhone, setGuestPhone] = useState('');
   const [guestAddress, setGuestAddress] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Thermal 58mm Receipt Modal State
+  const [isThermalOpen, setIsThermalOpen] = useState(false);
+  const [thermalReceiptData, setThermalReceiptData] = useState<any>(null);
 
   if (!isOpen) return null;
 
@@ -86,19 +94,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
 
       // 2. Format Delivery Label
       const deliveryLabels: Record<string, string> = {
-        pickup: 'Ambil Sendiri di Toko (Self-Pickup)',
+        pickup: `Ambil Sendiri di Toko (${storeSettings.address})`,
         instant: 'Kurir Instan (Gojek / Grab / Lalamove)',
         kargo: 'Ekspedisi Kargo (Dakota / Baraka / Bal-balan)'
       };
 
       // 3. Format WhatsApp Text (Clean, Professional, Indented)
-      let text = `Halo Admin *${STORE_INFO.name}*!\n`;
+      let text = `Halo Admin *${storeSettings.storeName}*!\n`;
       text += `Saya ingin melakukan pemesanan plastik & kemasan:\n\n`;
       text += `📄 *NOMOR PESANAN:* ${orderNumber}\n`;
       text += `👤 *PEMESAN:* ${customerName}\n`;
       text += `📱 *NO. HP:* ${customerPhone}\n`;
       if (deliveryMethod !== 'pickup') {
         text += `📍 *ALAMAT KIRIM:* ${customerAddress}\n`;
+      } else {
+        text += `📍 *LOKASI PICKUP:* ${storeSettings.address}\n`;
       }
       text += `🚚 *METODE:* ${deliveryLabels[deliveryMethod]}\n`;
       text += `⚖️ *ESTIMASI BERAT:* ${totalWeightKg} Kg\n\n`;
@@ -121,13 +131,46 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       text += `\n🔒 *KODE INTEGRITAS:* [VERIF: ${code}]\n`;
       text += `_Mohon info ketersediaan stok & nomor rekening pembayaran. Terima kasih!_`;
 
-      const encodedUrl = `https://wa.me/${STORE_INFO.phone}?text=${encodeURIComponent(text)}`;
+      const encodedUrl = `https://wa.me/${storeSettings.phone}?text=${encodeURIComponent(text)}`;
       window.open(encodedUrl, '_blank');
     } catch (err) {
       console.error('Gagal memproses pesanan:', err);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleOpenThermalReceipt = async () => {
+    if (items.length === 0) return;
+    const orderNumber = `TP-${new Date().getFullYear()}-${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const checksumData = {
+      order_number: orderNumber,
+      items: items.map((i) => ({ sku: i.sku, qty: i.qty, price: i.price })),
+      subtotal,
+      deliveryMethod,
+      token: customer?.qr_token || 'guest'
+    };
+    const { code } = await generateVerificationChecksum(checksumData);
+
+    const deliveryLabels: Record<string, string> = {
+      pickup: 'Ambil di Toko Fisik',
+      instant: 'Kurir Instan Lokal',
+      kargo: 'Ekspedisi Kargo Bal'
+    };
+
+    setThermalReceiptData({
+      orderNumber,
+      customerName: customer?.business_name || guestName || 'Pelanggan Umum',
+      customerPhone: customer?.phone_number || guestPhone || '-',
+      customerAddress: customer?.delivery_address || guestAddress || '-',
+      deliveryMethodName: deliveryLabels[deliveryMethod] || 'Kurir Toko',
+      items,
+      subtotal,
+      totalWeightKg,
+      verificationCode: code
+    });
+
+    setIsThermalOpen(true);
   };
 
   const handleDownloadInvoice = async () => {
@@ -445,7 +488,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
                 <span>Terverifikasi Kriptografis (Anti-Manipulasi Harga)</span>
               </div>
 
-              {/* Action Buttons: WhatsApp & PDF Invoice */}
+              {/* Action Buttons: WhatsApp, Thermal 58mm & PDF Invoice */}
               <div className="space-y-2">
                 <button
                   onClick={handleSendToWhatsApp}
@@ -456,20 +499,48 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
                   <span>Kirim Pesanan ke WhatsApp</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={handleDownloadInvoice}
-                  className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-slate-700 rounded-xl font-bold text-xs neo-border flex items-center justify-center gap-1.5 transition-all"
-                >
-                  <FileDown className="w-4 h-4 text-primary" />
-                  <span>Cetak / Unduh Nota Struk PDF</span>
-                </button>
+                <div className="grid grid-cols-2 gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleOpenThermalReceipt}
+                    className="py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs neo-border shadow-sm flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Struk 58mm</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleDownloadInvoice}
+                    className="py-2.5 px-3 bg-white hover:bg-slate-100 text-slate-800 rounded-xl font-bold text-xs neo-border flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <FileDown className="w-4 h-4 text-primary" />
+                    <span>Faktur A4</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
 
         </div>
       </div>
+
+      {/* 58mm POS Thermal Receipt Preview & Direct Print Modal */}
+      {thermalReceiptData && (
+        <ThermalReceiptModal
+          isOpen={isThermalOpen}
+          onClose={() => setIsThermalOpen(false)}
+          orderNumber={thermalReceiptData.orderNumber}
+          customerName={thermalReceiptData.customerName}
+          customerPhone={thermalReceiptData.customerPhone}
+          customerAddress={thermalReceiptData.customerAddress}
+          deliveryMethodName={thermalReceiptData.deliveryMethodName}
+          items={thermalReceiptData.items}
+          subtotal={thermalReceiptData.subtotal}
+          totalWeightKg={thermalReceiptData.totalWeightKg}
+          verificationCode={thermalReceiptData.verificationCode}
+        />
+      )}
     </div>
   );
 };

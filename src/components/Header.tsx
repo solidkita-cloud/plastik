@@ -14,8 +14,9 @@ import {
   HelpCircle,
   Info
 } from 'lucide-react';
-import { STORE_INFO, CATEGORIES } from '../lib/constants';
+import { CATEGORIES } from '../lib/constants';
 import { useCartStore } from '../stores/cartStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { searchFlatCatalog, FlatCatalogItem } from '../lib/catalogDb';
 
 interface HeaderProps {
@@ -48,6 +49,7 @@ export const Header: React.FC<HeaderProps> = ({
   const searchDropdownRef = useRef<HTMLDivElement>(null);
 
   const totalQty = useCartStore((state) => state.getTotalQty());
+  const storeSettings = useSettingsStore();
 
   // Instant search lookup
   useEffect(() => {
@@ -86,9 +88,9 @@ export const Header: React.FC<HeaderProps> = ({
 
   const openWhatsAppDirect = () => {
     const text = encodeURIComponent(
-      `Halo Admin ${STORE_INFO.name}! Saya ingin konsultasi ketersediaan stok kemasan & harga grosir.`
+      `Halo Admin ${storeSettings.storeName}! Saya ingin konsultasi ketersediaan stok kemasan & harga grosir.`
     );
-    window.open(`https://wa.me/${STORE_INFO.phone}?text=${text}`, '_blank');
+    window.open(`https://wa.me/${storeSettings.phone}?text=${text}`, '_blank');
   };
 
   return (
@@ -105,20 +107,28 @@ export const Header: React.FC<HeaderProps> = ({
             }}
             className="flex items-center gap-2.5 cursor-pointer shrink-0 select-none group"
           >
-            <div className="w-10 h-10 md:w-11 md:h-11 rounded-xl bg-primary flex items-center justify-center text-white shadow-hard-sm neo-border group-hover:bg-primary-dark transition-all">
-              <Package className="w-6 h-6" />
-            </div>
+            {storeSettings.logoUrl ? (
+              <img
+                src={storeSettings.logoUrl}
+                alt={storeSettings.storeName}
+                className="w-10 h-10 md:w-11 md:h-11 rounded-xl object-contain bg-white shadow-hard-sm neo-border p-1"
+              />
+            ) : (
+              <div className="w-10 h-10 md:w-11 md:h-11 rounded-xl bg-primary flex items-center justify-center text-white shadow-hard-sm neo-border group-hover:bg-primary-dark transition-all">
+                <Package className="w-6 h-6" />
+              </div>
+            )}
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="font-display font-extrabold text-2xl md:text-3xl tracking-tight text-primary">
-                  Plasti<span className="text-ink">Pro</span>
+                  {storeSettings.storeName}
                 </span>
                 <span className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-eco-light text-eco-dark rounded border border-eco">
                   Grosir
                 </span>
               </div>
               <p className="text-[11px] font-semibold text-slate-500 hidden sm:block tracking-wide">
-                {STORE_INFO.tagline}
+                {storeSettings.tagline}
               </p>
             </div>
           </div>

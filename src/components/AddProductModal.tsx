@@ -6,7 +6,8 @@ import {
   Trash2, 
   Check, 
   Package, 
-  Layers
+  Layers,
+  Image as ImageIcon
 } from 'lucide-react';
 import { Product, ProductVariant, VariantUnit } from '../types';
 import { CATEGORIES } from '../lib/constants';
@@ -38,7 +39,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [imagePreview, setImagePreview] = useState('');
   const [tagsInput, setTagsInput] = useState('Grosir, Best Seller, Food Grade');
 
-  // Dynamic Variants
+  // Dynamic Variants (Spacious default)
   const [variants, setVariants] = useState<ProductVariant[]>([
     {
       id: `var_${Date.now()}_1`,
@@ -169,8 +170,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     const productId = `prod_${Date.now()}`;
     const cleanTags = tagsInput.split(',').map((t) => t.trim()).filter(Boolean);
 
-    // Default placeholder SVG if no image uploaded
-    const finalImage = imageUrl.trim() || `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" width="100%" height="100%"><rect width="400" height="400" fill="%23F1F5F9"/><circle cx="200" cy="180" r="80" fill="%230284C7" opacity="0.2"/><text x="200" y="190" font-family="Arial,sans-serif" font-size="24" font-weight="bold" fill="%230284C7" text-anchor="middle">${encodeURIComponent(name.substring(0, 15))}</text><text x="200" y="220" font-family="Arial,sans-serif" font-size="16" fill="%23475569" text-anchor="middle">Kemasan Berkualitas</text></svg>`;
+    // Default clean packaging placeholder image if empty
+    const finalImage = imageUrl.trim() || '/products/cup-16oz.jpg';
 
     // Format variants with product id
     const finalVariants = variants.map((v) => ({
@@ -201,434 +202,497 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-ink/75 backdrop-blur-sm animate-fadeIn">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/75 backdrop-blur-sm overflow-y-auto animate-fadeIn">
+      {/* Spacious Modal Container (max-w-5xl, breathable, eye-friendly) */}
       <div 
-        className="bg-white w-full max-w-2xl rounded-2xl neo-border-thick neo-shadow-lg overflow-hidden flex flex-col max-h-[92vh]"
+        className="bg-white w-full max-w-5xl rounded-3xl neo-border-thick shadow-hard-lg overflow-hidden flex flex-col my-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div className="p-4 border-b-2 border-ink bg-slate-50 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center neo-border">
-              <Plus className="w-5 h-5" />
+        {/* Header - Spacious with Clear Contrast */}
+        <div className="px-6 py-5 sm:px-8 border-b-2 border-ink bg-slate-100 flex items-center justify-between">
+          <div className="flex items-center gap-3.5">
+            <div className="w-11 h-11 rounded-2xl bg-primary text-white flex items-center justify-center neo-border shadow-sm">
+              <Plus className="w-6 h-6" />
             </div>
             <div>
-              <h3 className="font-display font-black text-base sm:text-lg text-ink">
+              <h3 className="font-display font-black text-xl sm:text-2xl text-ink">
                 Tambah Produk Baru ke Katalog
               </h3>
-              <p className="text-[11px] text-slate-500 font-semibold">
-                Formulir lengkap nama, deskripsi, gambar, varian & multi-satuan
+              <p className="text-xs sm:text-sm text-slate-500 font-medium">
+                Formulir lapang & lengkap: identitas, foto produk, varian & multi-tier satuan harga (Pcs / Pak / Dus)
               </p>
             </div>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-500 hover:text-ink hover:bg-slate-200 transition-colors"
+            className="p-2.5 rounded-2xl text-slate-500 hover:text-ink hover:bg-slate-200 transition-colors"
           >
-            <X className="w-5 h-5" />
+            <X className="w-6 h-6" />
           </button>
         </div>
 
-        {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-5 overflow-y-auto space-y-6">
+        {/* Form Body - Wide, Organized Cards, Generous Margins & 48px+ Input Heights */}
+        <form onSubmit={handleSubmit} className="p-6 sm:p-8 overflow-y-auto max-h-[80vh] space-y-8 bg-slate-50/50">
           
-          {/* 1. Informasi Utama Produk */}
-          <div className="space-y-3">
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-              <Package className="w-4 h-4 text-primary" />
-              <span>1. Identitas Produk:</span>
-            </h4>
-
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Nama Produk *
-              </label>
-              <input
-                type="text"
-                required
-                placeholder="Contoh: Thinwall Kotak Bento Sekat 3 (1000 ml)"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl border-2 border-slate-300 focus:border-primary focus:outline-none"
-              />
+          {/* BAGIAN 1: Identitas & Informasi Utama */}
+          <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-5">
+            <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
+              <Package className="w-5 h-5 text-primary" />
+              <h4 className="font-display font-black text-base sm:text-lg text-ink">
+                1. Informasi Dasar Produk
+              </h4>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Nama Produk */}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-extrabold text-slate-800 mb-2">
+                  Nama Produk <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Contoh: Thinwall Kotak Bento Sekat 4 (1.000 ml)"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full h-13 px-4 text-sm sm:text-base font-semibold rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 transition-all outline-none bg-slate-50 focus:bg-white placeholder:text-slate-400"
+                />
+              </div>
+
+              {/* Kategori */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Kategori Produk
+                <label className="block text-sm font-extrabold text-slate-800 mb-2">
+                  Kategori Kemasan
                 </label>
                 <select
                   value={categoryId}
                   onChange={(e) => setCategoryId(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border-2 border-slate-300 focus:border-primary focus:outline-none bg-white font-semibold"
+                  className="w-full h-13 px-4 text-sm sm:text-base font-semibold rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 transition-all outline-none bg-slate-50 focus:bg-white cursor-pointer"
                 >
-                  {CATEGORIES.filter((c) => c.id !== 'cat_all').map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
+                  {CATEGORIES.filter((c) => c.id !== 'cat_all').map((cat) => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.name}
                     </option>
                   ))}
                 </select>
               </div>
 
+              {/* Bahan / Material */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Bahan / Material
+                <label className="block text-sm font-extrabold text-slate-800 mb-2">
+                  Material Plastik / Kertas
                 </label>
                 <select
                   value={material}
                   onChange={(e) => setMaterial(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border-2 border-slate-300 focus:border-primary focus:outline-none bg-white font-semibold"
+                  className="w-full h-13 px-4 text-sm sm:text-base font-semibold rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 transition-all outline-none bg-slate-50 focus:bg-white cursor-pointer"
                 >
-                  <option value="PP">PP (Polypropylene - Tahan Panas)</option>
-                  <option value="HDPE">HDPE (Kresek Tebal)</option>
-                  <option value="PE">PE (Plastik Bening)</option>
-                  <option value="PET">PET (Mika / Cup Bening Kristal)</option>
-                  <option value="Kraft">Paper Kraft Coklat</option>
-                  <option value="Biodegradable">Biodegradable (Ramah Lingkungan)</option>
-                  <option value="Paper">Paper / Kertas</option>
+                  <option value="PP">PP (Polypropylene - Tahan Panas & Sealer)</option>
+                  <option value="PE">PE (Polyethylene - Fleksibel & Tahan Dingin)</option>
+                  <option value="HDPE">HDPE (High Density - Kresek Kuat & Ulet)</option>
+                  <option value="PET">PET (Polyethylene Terephthalate - Sangat Bening)</option>
+                  <option value="Paper">Paper (Kertas Khusus Makanan)</option>
+                  <option value="Kraft">Kraft Coklat (Eco Friendly Laminasi)</option>
+                  <option value="Biodegradable">Biodegradable (Singkong / Jagung Alami)</option>
                   <option value="Other">Lainnya</option>
                 </select>
               </div>
-            </div>
 
-            {/* Checkbox Attributes */}
-            <div className="flex flex-wrap items-center gap-4 pt-1">
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
+              {/* Badge Produk */}
+              <div>
+                <label className="block text-sm font-extrabold text-slate-800 mb-2">
+                  Label / Badge Unggulan
+                </label>
+                <select
+                  value={badge}
+                  onChange={(e) => setBadge(e.target.value as any)}
+                  className="w-full h-13 px-4 text-sm sm:text-base font-semibold rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 transition-all outline-none bg-slate-50 focus:bg-white cursor-pointer"
+                >
+                  <option value="">(Tanpa Badge)</option>
+                  <option value="Best Seller">🔥 Best Seller (Kuning)</option>
+                  <option value="Eco Friendly">🌱 Eco Friendly (Hijau)</option>
+                  <option value="Promo">🏷️ Promo (Merah)</option>
+                  <option value="Baru">✨ Baru (Biru)</option>
+                </select>
+              </div>
+
+              {/* Tags Pencarian */}
+              <div>
+                <label className="block text-sm font-extrabold text-slate-800 mb-2">
+                  Tag Kata Kunci (Dipisah Koma)
+                </label>
                 <input
-                  type="checkbox"
-                  checked={foodGrade}
-                  onChange={(e) => setFoodGrade(e.target.checked)}
-                  className="w-4 h-4 text-primary rounded"
+                  type="text"
+                  placeholder="Grosir, Best Seller, Food Grade, Tahan Panas"
+                  value={tagsInput}
+                  onChange={(e) => setTagsInput(e.target.value)}
+                  className="w-full h-13 px-4 text-sm sm:text-base font-semibold rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 transition-all outline-none bg-slate-50 focus:bg-white placeholder:text-slate-400"
                 />
-                <span>Food Grade</span>
-              </label>
+              </div>
 
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={microwaveSafe}
-                  onChange={(e) => setMicrowaveSafe(e.target.checked)}
-                  className="w-4 h-4 text-primary rounded"
+              {/* Deskripsi Produk */}
+              <div className="md:col-span-2">
+                <label className="block text-sm font-extrabold text-slate-800 mb-2">
+                  Deskripsi Lengkap Produk
+                </label>
+                <textarea
+                  rows={3}
+                  placeholder="Tuliskan spesifikasi, keunggulan, standar ketebalan, serta rekomendasi jenis makanan/minuman yang cocok..."
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  className="w-full p-4 text-sm sm:text-base font-normal rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 transition-all outline-none bg-slate-50 focus:bg-white placeholder:text-slate-400 leading-relaxed"
                 />
-                <span>Microwave Safe (Tahan Panas)</span>
-              </label>
+              </div>
 
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-slate-700">
-                <input
-                  type="checkbox"
-                  checked={freezerSafe}
-                  onChange={(e) => setFreezerSafe(e.target.checked)}
-                  className="w-4 h-4 text-primary rounded"
-                />
-                <span>Freezer Safe (Tahan Beku)</span>
-              </label>
-            </div>
+              {/* Sertifikasi Keamanan Makanan (Spacious Clickable Cards) */}
+              <div className="md:col-span-2 pt-2">
+                <label className="block text-sm font-extrabold text-slate-800 mb-3">
+                  Sertifikasi & Ketahanan Suhu:
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                  <label className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center gap-3 transition-all ${
+                    foodGrade ? 'bg-sky-50 border-primary text-primary-dark font-extrabold shadow-sm' : 'bg-slate-50 border-slate-300 text-slate-700'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={foodGrade}
+                      onChange={(e) => setFoodGrade(e.target.checked)}
+                      className="w-5 h-5 rounded text-primary focus:ring-0 cursor-pointer"
+                    />
+                    <span className="text-sm">100% Food Grade</span>
+                  </label>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Deskripsi Lengkap Produk
-              </label>
-              <textarea
-                rows={2}
-                placeholder="Jelaskan keunggulan, ketebalan, peruntukan makanan/minuman, dan standar tutup klip..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                className="w-full px-3 py-2 text-xs rounded-xl border-2 border-slate-300 focus:border-primary focus:outline-none"
-              />
+                  <label className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center gap-3 transition-all ${
+                    microwaveSafe ? 'bg-sky-50 border-primary text-primary-dark font-extrabold shadow-sm' : 'bg-slate-50 border-slate-300 text-slate-700'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={microwaveSafe}
+                      onChange={(e) => setMicrowaveSafe(e.target.checked)}
+                      className="w-5 h-5 rounded text-primary focus:ring-0 cursor-pointer"
+                    />
+                    <span className="text-sm">Microwave Safe (Tahan Panas)</span>
+                  </label>
+
+                  <label className={`p-4 rounded-2xl border-2 cursor-pointer flex items-center gap-3 transition-all ${
+                    freezerSafe ? 'bg-sky-50 border-primary text-primary-dark font-extrabold shadow-sm' : 'bg-slate-50 border-slate-300 text-slate-700'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={freezerSafe}
+                      onChange={(e) => setFreezerSafe(e.target.checked)}
+                      className="w-5 h-5 rounded text-primary focus:ring-0 cursor-pointer"
+                    />
+                    <span className="text-sm">Freezer Safe (Tahan Beku)</span>
+                  </label>
+                </div>
+              </div>
+
             </div>
           </div>
 
-          {/* 2. Gambar & Badge */}
-          <div className="space-y-3 pt-3 border-t border-slate-200">
-            <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-              <Upload className="w-4 h-4 text-primary" />
-              <span>2. Foto Produk & Label Badge:</span>
-            </h4>
+          {/* BAGIAN 2: Foto & Visual Produk (Lapang & Jelas) */}
+          <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-5">
+            <div className="flex items-center gap-2 pb-3 border-b border-slate-200">
+              <ImageIcon className="w-5 h-5 text-primary" />
+              <h4 className="font-display font-black text-base sm:text-lg text-ink">
+                2. Foto Produk Kemasan
+              </h4>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Upload Foto dari Perangkat:
-                </label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageFileChange}
-                  className="block w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-extrabold file:bg-primary file:text-white hover:file:bg-primary-dark cursor-pointer"
-                />
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-center">
+              {/* Preview Box */}
+              <div className="md:col-span-4 flex flex-col items-center justify-center">
+                <div className="w-full aspect-square max-w-[220px] rounded-2xl neo-border bg-slate-100 flex items-center justify-center overflow-hidden p-3 shadow-inner relative">
+                  {imagePreview || imageUrl ? (
+                    <img
+                      src={imagePreview || imageUrl}
+                      alt="Preview Produk"
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <div className="text-center p-4">
+                      <Package className="w-12 h-12 text-slate-300 mx-auto mb-2" />
+                      <span className="text-xs font-semibold text-slate-400">
+                        Belum ada foto yang dipilih
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <span className="text-xs font-bold text-slate-500 mt-2">Pratinjau Foto Produk</span>
+              </div>
 
-                <div className="mt-2">
-                  <span className="text-[10px] text-slate-400 font-bold block mb-1">Atau gunakan URL Gambar:</span>
+              {/* Upload Controls */}
+              <div className="md:col-span-8 space-y-4">
+                <div className="p-5 border-2 border-dashed border-slate-300 hover:border-primary rounded-2xl bg-slate-50 transition-colors text-center cursor-pointer relative group">
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageFileChange}
+                    className="absolute inset-0 opacity-0 cursor-pointer"
+                  />
+                  <Upload className="w-8 h-8 text-primary mx-auto mb-2 group-hover:scale-110 transition-transform" />
+                  <span className="font-extrabold text-sm text-ink block">
+                    Pilih File Foto dari Perangkat (Galeri / Komputer)
+                  </span>
+                  <span className="text-xs text-slate-500 mt-0.5 block">
+                    Format JPG, PNG, atau WebP (Disarankan latar studio bersih)
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-600 mb-1.5">
+                    Atau Masukkan URL Link Gambar:
+                  </label>
                   <input
                     type="url"
-                    placeholder="https://.../foto-produk.png"
+                    placeholder="https://contoh-domain.com/gambar-kemasan.jpg"
                     value={imageUrl}
                     onChange={(e) => {
                       setImageUrl(e.target.value);
                       setImagePreview(e.target.value);
                     }}
-                    className="w-full px-2.5 py-1.5 text-xs rounded-xl border border-slate-300 focus:border-primary focus:outline-none"
+                    className="w-full h-12 px-4 text-sm font-mono rounded-xl border border-slate-300 focus:border-primary outline-none bg-slate-50 focus:bg-white"
                   />
                 </div>
-              </div>
-
-              {/* Preview image */}
-              <div className="p-3 bg-slate-50 rounded-xl neo-border flex items-center justify-center h-28">
-                {imagePreview ? (
-                  <img
-                    src={imagePreview}
-                    alt="Preview"
-                    className="max-h-full max-w-full object-contain rounded-lg"
-                  />
-                ) : (
-                  <span className="text-xs font-bold text-slate-400">
-                    Preview Foto Produk
-                  </span>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Badge Khusus (Opsional)
-                </label>
-                <select
-                  value={badge}
-                  onChange={(e) => setBadge(e.target.value as any)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border-2 border-slate-300 focus:border-primary focus:outline-none bg-white font-semibold"
-                >
-                  <option value="">Tanpa Badge</option>
-                  <option value="Best Seller">Best Seller (Paling Laris)</option>
-                  <option value="Eco Friendly">Eco Friendly (Ramah Lingkungan)</option>
-                  <option value="Promo">Promo Diskon</option>
-                  <option value="Baru">Baru Masuk</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  Tag Pencarian (Dipisah koma)
-                </label>
-                <input
-                  type="text"
-                  placeholder="Grosir, Anti Bocor, Bento, Boba"
-                  value={tagsInput}
-                  onChange={(e) => setTagsInput(e.target.value)}
-                  className="w-full px-3 py-2 text-xs rounded-xl border-2 border-slate-300 focus:border-primary focus:outline-none"
-                />
               </div>
             </div>
           </div>
 
-          {/* 3. Varian Ukuran & Multi-Satuan Grosir */}
-          <div className="space-y-4 pt-3 border-t border-slate-200">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-black uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-                <Layers className="w-4 h-4 text-accent" />
-                <span>3. Varian Ukuran & Multi-Satuan Grosir:</span>
-              </h4>
+          {/* BAGIAN 3: Varian Ukuran & Multi-Tier Satuan Harga (Lapang & Lega) */}
+          <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-200 gap-3">
+              <div className="flex items-center gap-2">
+                <Layers className="w-5 h-5 text-primary" />
+                <h4 className="font-display font-black text-base sm:text-lg text-ink">
+                  3. Varian Ukuran & Multi-Tier Satuan (Pcs / Pak / Dus)
+                </h4>
+              </div>
 
               <button
                 type="button"
                 onClick={handleAddVariant}
-                className="py-1 px-2.5 bg-primary hover:bg-primary-dark text-white rounded-lg text-xs font-bold flex items-center gap-1"
+                className="px-4 py-2 bg-sky-100 hover:bg-sky-200 text-primary-dark font-extrabold text-xs sm:text-sm rounded-xl border border-sky-300 flex items-center gap-1.5 transition-all self-start sm:self-auto"
               >
-                <Plus className="w-3.5 h-3.5" />
-                <span>+ Tambah Ukuran</span>
+                <Plus className="w-4 h-4" />
+                <span>+ Tambah Ukuran Baru</span>
               </button>
             </div>
 
-            {/* List of Variants */}
-            <div className="space-y-4">
-              {variants.map((variant, vIdx) => (
-                <div
-                  key={variant.id}
-                  className="p-4 bg-slate-50 rounded-xl neo-border space-y-3"
+            {/* Variants List */}
+            <div className="space-y-6">
+              {variants.map((v, vIdx) => (
+                <div 
+                  key={v.id} 
+                  className="p-5 sm:p-6 bg-slate-50 rounded-2xl border-2 border-slate-300 space-y-5"
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="font-extrabold text-xs text-primary-dark uppercase">
-                      Varian #{vIdx + 1}
-                    </span>
-                    {variants.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveVariant(vIdx)}
-                        className="text-red-500 hover:text-red-700 p-1 text-xs flex items-center gap-1 font-semibold"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Hapus Ukuran</span>
-                      </button>
-                    )}
+                  {/* Variant Header */}
+                  <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                    <div className="flex items-center gap-3">
+                      <span className="w-7 h-7 rounded-lg bg-primary text-white font-black text-xs flex items-center justify-center">
+                        {vIdx + 1}
+                      </span>
+                      <span className="font-extrabold text-sm sm:text-base text-ink">
+                        Ukuran / Tipe Varian:
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveVariant(vIdx)}
+                      className="px-3 py-1.5 text-xs font-bold text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-1 border border-red-200"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Hapus Ukuran</span>
+                    </button>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  {/* Variant Fields */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Nama Varian/Ukuran</label>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Nama Ukuran (cth: 500 ml, 16 oz, 24x24)
+                      </label>
                       <input
                         type="text"
-                        placeholder="Cth: 650 ml / 16 oz"
-                        value={variant.name}
+                        required
+                        value={v.name}
                         onChange={(e) => {
                           const updated = [...variants];
                           updated[vIdx].name = e.target.value;
                           setVariants(updated);
                         }}
-                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 font-semibold"
+                        className="w-full h-11 px-3.5 text-sm font-semibold rounded-xl border border-slate-300 focus:border-primary outline-none bg-white"
                       />
                     </div>
+
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Kode SKU</label>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Kode SKU Gudang
+                      </label>
                       <input
                         type="text"
-                        value={variant.sku}
+                        value={v.sku}
                         onChange={(e) => {
                           const updated = [...variants];
                           updated[vIdx].sku = e.target.value;
                           setVariants(updated);
                         }}
-                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300 font-mono"
+                        className="w-full h-11 px-3.5 text-sm font-mono uppercase rounded-xl border border-slate-300 focus:border-primary outline-none bg-white"
                       />
                     </div>
+
                     <div>
-                      <label className="block text-[11px] font-bold text-slate-600 mb-0.5">Detail Dimensi</label>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Dimensi Fisik (cm)
+                      </label>
                       <input
                         type="text"
-                        placeholder="17 x 12 x 5 cm"
-                        value={variant.dimension_detail || ''}
+                        placeholder="Cth: 17 x 12 x 5 cm"
+                        value={v.dimension_detail || ''}
                         onChange={(e) => {
                           const updated = [...variants];
                           updated[vIdx].dimension_detail = e.target.value;
                           setVariants(updated);
                         }}
-                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-300"
+                        className="w-full h-11 px-3.5 text-sm font-medium rounded-xl border border-slate-300 focus:border-primary outline-none bg-white"
                       />
                     </div>
                   </div>
 
-                  {/* Multi-tier Units for this variant */}
-                  <div className="pt-2 border-t border-slate-200 space-y-2">
+                  {/* Units Table for this variant */}
+                  <div className="pt-2 space-y-3">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-black text-slate-600 uppercase">
-                        Tingkatan Satuan & Harga (Ecer, Pak, Dus):
+                      <span className="text-xs font-black uppercase tracking-wider text-slate-600">
+                        Harga & Satuan Jual Bertingkat (Pcs / Pak / Dus):
                       </span>
                       <button
                         type="button"
                         onClick={() => handleAddUnitToVariant(vIdx)}
-                        className="text-[11px] font-bold text-primary hover:underline flex items-center gap-0.5"
+                        className="text-xs font-extrabold text-primary hover:underline flex items-center gap-1"
                       >
-                        <Plus className="w-3 h-3" />
-                        <span>Tambah Satuan</span>
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>+ Tambah Tingkat Satuan</span>
                       </button>
                     </div>
 
-                    <div className="space-y-1.5">
-                      {variant.units.map((unit, uIdx) => (
-                        <div
-                          key={unit.id}
-                          className="grid grid-cols-12 gap-1.5 items-center bg-white p-2 rounded-lg border border-slate-200 text-xs"
+                    <div className="space-y-3">
+                      {v.units.map((u, uIdx) => (
+                        <div 
+                          key={u.id}
+                          className="p-4 bg-white rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center shadow-sm"
                         >
-                          <div className="col-span-3">
+                          <div className="sm:col-span-3">
+                            <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
+                              Satuan:
+                            </label>
                             <select
-                              value={unit.unit_code}
+                              value={u.unit_code}
                               onChange={(e) => {
                                 const updated = [...variants];
                                 updated[vIdx].units[uIdx].unit_code = e.target.value as any;
                                 setVariants(updated);
                               }}
-                              className="w-full p-1 border rounded text-[11px] font-bold"
+                              className="w-full h-10 px-2.5 text-xs font-bold rounded-lg border border-slate-300 bg-slate-50"
                             >
                               <option value="PCS">PCS (Ecer)</option>
-                              <option value="PAK">PAK (Pack)</option>
-                              <option value="IKAT">IKAT / BAL</option>
+                              <option value="PAK">PAK (Bungkus)</option>
                               <option value="DUS">DUS (Karton)</option>
-                              <option value="ROLL">ROLL</option>
-                              <option value="RIM">RIM</option>
+                              <option value="IKAT">IKAT (Bal)</option>
+                              <option value="ROLL">ROLL (Gulung)</option>
                               <option value="KG">KG (Kiloan)</option>
                             </select>
                           </div>
 
-                          <div className="col-span-3">
+                          <div className="sm:col-span-4">
+                            <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
+                              Nama Label Satuan:
+                            </label>
                             <input
                               type="text"
-                              placeholder="Nama Satuan (cth: Pack 50)"
-                              value={unit.unit_name}
+                              value={u.unit_name}
                               onChange={(e) => {
                                 const updated = [...variants];
                                 updated[vIdx].units[uIdx].unit_name = e.target.value;
                                 setVariants(updated);
                               }}
-                              className="w-full p-1 border rounded text-[11px]"
+                              placeholder="Cth: Pack (Isi 50 pcs)"
+                              className="w-full h-10 px-3 text-xs font-semibold rounded-lg border border-slate-300"
                             />
                           </div>
 
-                          <div className="col-span-2">
+                          <div className="sm:col-span-2">
+                            <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
+                              Isi Multiplier (Pcs):
+                            </label>
                             <input
                               type="number"
-                              title="Isi per satuan dasar (pcs)"
-                              placeholder="Isi pcs"
-                              value={unit.base_multiplier}
+                              min={1}
+                              value={u.base_multiplier}
                               onChange={(e) => {
                                 const updated = [...variants];
                                 updated[vIdx].units[uIdx].base_multiplier = Number(e.target.value) || 1;
                                 setVariants(updated);
                               }}
-                              className="w-full p-1 border rounded text-[11px] font-bold text-center"
+                              className="w-full h-10 px-3 text-xs font-bold rounded-lg border border-slate-300"
                             />
                           </div>
 
-                          <div className="col-span-3">
+                          <div className="sm:col-span-2">
+                            <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
+                              Harga Jual (Rp):
+                            </label>
                             <input
                               type="number"
-                              placeholder="Harga (Rp)"
-                              value={unit.price}
+                              step={500}
+                              min={0}
+                              value={u.price}
                               onChange={(e) => {
                                 const updated = [...variants];
                                 updated[vIdx].units[uIdx].price = Number(e.target.value) || 0;
                                 setVariants(updated);
                               }}
-                              className="w-full p-1 border rounded text-[11px] font-extrabold text-accent"
+                              className="w-full h-10 px-3 text-xs font-extrabold text-accent rounded-lg border border-slate-300"
                             />
                           </div>
 
-                          <div className="col-span-1 text-center">
-                            {variant.units.length > 1 && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveUnitFromVariant(vIdx, uIdx)}
-                                className="text-red-500 hover:text-red-700"
-                              >
-                                <X className="w-3.5 h-3.5 mx-auto" />
-                              </button>
-                            )}
+                          <div className="sm:col-span-1 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveUnitFromVariant(vIdx, uIdx)}
+                              className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Hapus Satuan"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
                           </div>
                         </div>
                       ))}
                     </div>
                   </div>
+
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Footer Submit */}
-          <div className="pt-4 border-t-2 border-ink flex items-center justify-between gap-3">
+          {/* Form Actions Footer - Large Comfortable Buttons */}
+          <div className="pt-4 flex flex-col sm:flex-row items-center justify-end gap-3.5 border-t border-slate-200">
             <button
               type="button"
               onClick={onClose}
-              className="py-2.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold"
+              className="w-full sm:w-auto px-7 py-3.5 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-sm sm:text-base rounded-2xl transition-all"
             >
               Batal
             </button>
 
             <button
               type="submit"
-              className="py-2.5 px-6 bg-accent hover:bg-accent-dark text-white rounded-xl text-xs sm:text-sm font-extrabold neo-border neo-shadow-accent flex items-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5"
+              className="w-full sm:w-auto px-9 py-4 bg-primary hover:bg-primary-dark text-white font-black text-sm sm:text-base rounded-2xl neo-border-thick neo-shadow transition-all flex items-center justify-center gap-2 active:translate-x-0.5 active:translate-y-0.5"
             >
-              <Check className="w-4 h-4" />
-              <span>Simpan & Tayangkan ke Katalog</span>
+              <Check className="w-5 h-5" />
+              <span>Simpan Produk ke Katalog</span>
             </button>
           </div>
 

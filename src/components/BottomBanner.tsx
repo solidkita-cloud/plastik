@@ -1,17 +1,19 @@
 import React from 'react';
 import { QrCode, ArrowRight, MessageCircle } from 'lucide-react';
-import { STORE_INFO } from '../lib/constants';
+import { useSettingsStore } from '../stores/settingsStore';
 
 interface BottomBannerProps {
   onOpenQR: () => void;
 }
 
 export const BottomBanner: React.FC<BottomBannerProps> = ({ onOpenQR }) => {
+  const storeSettings = useSettingsStore();
+
   const openWhatsApp = () => {
     const text = encodeURIComponent(
-      `Halo Admin ${STORE_INFO.name}! Saya ingin melakukan pemesanan rutin plastik & kemasan.`
+      `Halo Admin ${storeSettings.storeName}! Saya ingin melakukan pemesanan rutin plastik & kemasan.`
     );
-    window.open(`https://wa.me/${STORE_INFO.phone}?text=${text}`, '_blank');
+    window.open(`https://wa.me/${storeSettings.phone}?text=${text}`, '_blank');
   };
 
   return (

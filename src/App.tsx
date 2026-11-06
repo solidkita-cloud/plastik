@@ -25,14 +25,19 @@ import { Toast } from './components/Toast';
 import { AddProductModal } from './components/AddProductModal';
 import { StarterBundleModal } from './components/StarterBundleModal';
 
-import { CATEGORIES, STORE_INFO } from './lib/constants';
+import { CATEGORIES } from './lib/constants';
 import { initCatalogIndex } from './lib/catalogDb';
 import { Product } from './types';
 import { useCartStore } from './stores/cartStore';
 import { useCatalogStore } from './stores/catalogStore';
+import { useSettingsStore } from './stores/settingsStore';
+import { useCustomerStore } from './stores/customerStore';
 
 export const App: React.FC = () => {
   const products = useCatalogStore((state) => state.products);
+  const storeSettings = useSettingsStore();
+  const findCustomerByToken = useCustomerStore((state) => state.findByToken);
+
   const [activeCategory, setActiveCategory] = useState('cat_all');
   const [searchFilter, setSearchFilter] = useState('');
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -51,11 +56,31 @@ export const App: React.FC = () => {
 
   const isCartOpen = useCartStore((state) => state.isCartOpen);
   const setIsCartOpen = useCartStore((state) => state.setIsCartOpen);
+  const setCustomer = useCartStore((state) => state.setCustomer);
+  const addItem = useCartStore((state) => state.addItem);
+  const clearCart = useCartStore((state) => state.clearCart);
 
   // Initialize IndexedDB fast search index on mount
   useEffect(() => {
     initCatalogIndex(products);
   }, [products]);
+
+  // Real QR Scan URL auto-detection (?token=... or ?reorder=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token') || params.get('reorder');
+    if (token) {
+      const found = findCustomerByToken(token);
+      if (found && found.last_order) {
+        clearCart();
+        setCustomer(found);
+        found.last_order.items.forEach((item) => addItem(item));
+        showToastNotification(`Selamat datang kembali, ${found.business_name}! Keranjang belanja otomatis dimuat dari QR.`);
+        setIsCartOpen(true);
+      }
+    }
+  }, [findCustomerByToken]);
 
   // Filter products by category AND search query
   const filteredProducts = products.filter((p) => {
@@ -70,9 +95,9 @@ export const App: React.FC = () => {
 
   const openWhatsApp = () => {
     const text = encodeURIComponent(
-      `Halo Admin ${STORE_INFO.name}! Saya ingin bertanya tentang produk kemasan & harga grosir.`
+      `Halo Admin ${storeSettings.storeName}! Saya ingin bertanya tentang produk kemasan & harga grosir.`
     );
-    window.open(`https://wa.me/${STORE_INFO.phone}?text=${text}`, '_blank');
+    window.open(`https://wa.me/${storeSettings.phone}?text=${text}`, '_blank');
   };
 
   const showToastNotification = (msg: string) => {
@@ -273,21 +298,29 @@ export const App: React.FC = () => {
             
             {/* Brand column */}
             <div className="md:col-span-5 space-y-3">
-              <div className="flex items-center gap-2">
-                <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center neo-border">
-                  <Package className="w-5 h-5" />
-                </div>
+              <div className="flex items-center gap-2.5">
+                {storeSettings.logoUrl ? (
+                  <img
+                    src={storeSettings.logoUrl}
+                    alt={storeSettings.storeName}
+                    className="w-10 h-10 rounded-xl object-contain bg-white neo-border p-1"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center neo-border">
+                    <Package className="w-5 h-5" />
+                  </div>
+                )}
                 <span className="font-display font-black text-2xl text-white">
-                  Plasti<span className="text-primary-light">Pro</span>
+                  {storeSettings.storeName}
                 </span>
               </div>
               <p className="text-xs sm:text-sm text-slate-400 max-w-sm leading-relaxed">
-                Pusat grosir dan eceran aneka plastik kemasan, thinwall kotak makan, cup minuman, kantong kresek, paper bag, dan perlengkapan packing terlengkap untuk UMKM kuliner.
+                {storeSettings.tagline}. Pusat grosir dan eceran aneka plastik kemasan, thinwall kotak makan, cup minuman, kantong kresek, paper bag, dan perlengkapan packing terlengkap untuk UMKM kuliner.
               </p>
               <div className="flex items-center gap-3 pt-2 text-xs font-semibold text-slate-400">
                 <span className="flex items-center gap-1.5">
                   <Instagram className="w-4 h-4 text-pink-400" />
-                  {STORE_INFO.instagram}
+                  {storeSettings.instagram}
                 </span>
               </div>
             </div>
@@ -299,15 +332,20 @@ export const App: React.FC = () => {
               </h4>
               <p className="flex items-start gap-2 text-slate-400">
                 <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                <span>{STORE_INFO.address}</span>
+                <span>{storeSettings.address}</span>
               </p>
+              {storeSettings.landmark && (
+                <p className="text-[11px] text-slate-400 pl-6">
+                  Patokan: {storeSettings.landmark}
+                </p>
+              )}
               <p className="flex items-center gap-2 text-slate-400">
                 <Clock className="w-4 h-4 text-eco shrink-0" />
-                <span>{STORE_INFO.operationalHours}</span>
+                <span>{storeSettings.operationalHours}</span>
               </p>
               <p className="flex items-center gap-2 text-slate-400">
                 <Phone className="w-4 h-4 text-accent shrink-0" />
-                <span>WhatsApp: {STORE_INFO.phoneDisplay}</span>
+                <span>WhatsApp: {storeSettings.phoneDisplay}</span>
               </p>
             </div>
 
@@ -338,7 +376,7 @@ export const App: React.FC = () => {
                     onClick={() => setInfoModalType('about')}
                     className="hover:text-primary transition-colors"
                   >
-                    Profil Toko Fisik Sidoarjo
+                    Profil Toko Fisik
                   </button>
                 </li>
                 <li>
@@ -355,7 +393,7 @@ export const App: React.FC = () => {
           </div>
 
           <div className="pt-6 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-500 gap-2">
-            <p>© {new Date().getFullYear()} {STORE_INFO.name} ({STORE_INFO.tagline}). Hak Cipta Dilindungi.</p>
+            <p>© {new Date().getFullYear()} {storeSettings.storeName} ({storeSettings.tagline}). Hak Cipta Dilindungi.</p>
             <p className="font-semibold text-slate-400">
               Dual-Engine Offline-First • Multi-Agent Coordinated (Manager, Desain, Tester)
             </p>

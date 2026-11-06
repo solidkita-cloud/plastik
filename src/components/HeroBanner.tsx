@@ -1,17 +1,19 @@
 import React from 'react';
 import { CheckCircle2, ArrowRight } from 'lucide-react';
-import { STORE_INFO } from '../lib/constants';
+import { useSettingsStore } from '../stores/settingsStore';
 
 interface HeroBannerProps {
   onOrderClick: () => void;
 }
 
 export const HeroBanner: React.FC<HeroBannerProps> = ({ onOrderClick }) => {
+  const storeSettings = useSettingsStore();
+
   const openWhatsApp = () => {
     const text = encodeURIComponent(
-      `Halo ${STORE_INFO.name}! Saya ingin memesan plastik & kemasan untuk kebutuhan usaha kuliner / bisnis saya.`
+      `Halo ${storeSettings.storeName}! Saya ingin memesan plastik & kemasan untuk kebutuhan usaha kuliner / bisnis saya.`
     );
-    window.open(`https://wa.me/${STORE_INFO.phone}?text=${text}`, '_blank');
+    window.open(`https://wa.me/${storeSettings.phone}?text=${text}`, '_blank');
   };
 
   return (

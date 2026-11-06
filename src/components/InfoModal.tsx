@@ -1,6 +1,6 @@
 import React from 'react';
 import { X, Store, HelpCircle, Tag, Phone, MapPin, Clock, MessageCircle } from 'lucide-react';
-import { STORE_INFO } from '../lib/constants';
+import { useSettingsStore } from '../stores/settingsStore';
 
 interface InfoModalProps {
   type: 'about' | 'help' | 'promo' | null;
@@ -9,6 +9,8 @@ interface InfoModalProps {
 }
 
 export const InfoModal: React.FC<InfoModalProps> = ({ type, onClose, onOpenWA }) => {
+  const storeSettings = useSettingsStore();
+
   if (!type) return null;
 
   return (
@@ -29,12 +31,12 @@ export const InfoModal: React.FC<InfoModalProps> = ({ type, onClose, onOpenWA })
             </div>
             <div>
               <h3 className="font-display font-black text-base sm:text-lg text-ink">
-                {type === 'about' && 'Tentang Toko PlastiPro'}
+                {type === 'about' && `Tentang Toko ${storeSettings.storeName}`}
                 {type === 'help' && 'Pusat Bantuan & Customer Service'}
                 {type === 'promo' && 'Program Promo & Diskon Grosir'}
               </h3>
               <p className="text-[11px] text-slate-500 font-semibold">
-                Plastik & Kemasan Berkualitas Jawa Timur
+                {storeSettings.tagline}
               </p>
             </div>
           </div>
@@ -52,21 +54,26 @@ export const InfoModal: React.FC<InfoModalProps> = ({ type, onClose, onOpenWA })
           {type === 'about' && (
             <div className="space-y-3">
               <p className="leading-relaxed">
-                <strong>PlastiPro</strong> adalah distributor utama dan mitra terpercaya untuk kebutuhan kemasan makanan & minuman UMKM kuliner di Sidoarjo, Surabaya, dan seluruh Indonesia.
+                <strong>{storeSettings.storeName}</strong> adalah distributor utama dan mitra terpercaya untuk kebutuhan kemasan makanan & minuman UMKM kuliner di {storeSettings.city} dan seluruh Indonesia.
               </p>
               
               <div className="p-3 bg-sky-50 rounded-xl neo-border border-sky-300 space-y-2">
                 <div className="flex items-start gap-2">
                   <MapPin className="w-4 h-4 text-primary shrink-0 mt-0.5" />
-                  <span><strong>Alamat Fisik:</strong> {STORE_INFO.address}</span>
+                  <span><strong>Alamat Fisik:</strong> {storeSettings.address}</span>
                 </div>
+                {storeSettings.landmark && (
+                  <div className="text-[11px] text-slate-500 pl-6">
+                    Patokan: {storeSettings.landmark}
+                  </div>
+                )}
                 <div className="flex items-center gap-2">
                   <Clock className="w-4 h-4 text-eco shrink-0" />
-                  <span><strong>Operasional:</strong> {STORE_INFO.operationalHours}</span>
+                  <span><strong>Operasional:</strong> {storeSettings.operationalHours}</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Phone className="w-4 h-4 text-accent shrink-0" />
-                  <span><strong>Hotline:</strong> {STORE_INFO.phoneDisplay}</span>
+                  <span><strong>Hotline WA:</strong> {storeSettings.phoneDisplay}</span>
                 </div>
               </div>
 
