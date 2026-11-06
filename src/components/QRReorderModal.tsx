@@ -14,6 +14,7 @@ import { useCartStore } from '../stores/cartStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useCustomerStore } from '../stores/customerStore';
 import { useCatalogStore } from '../stores/catalogStore';
+import { saveCustomerToFirebase } from '../services/firebaseSync';
 import { CustomerProfile, CartItem } from '../types';
 
 interface QRReorderModalProps {
@@ -183,6 +184,9 @@ export const QRReorderModal: React.FC<QRReorderModalProps> = ({ isOpen, onClose,
     };
 
     addCustomer(newCustomerProfile);
+    saveCustomerToFirebase(newCustomerProfile).catch((err) => {
+      console.warn('Gagal sync mitra ke Firebase:', err);
+    });
     setSelectedCustomer(newCustomerProfile);
     setActiveTab('sticker');
     alert(`Mitra ${newCustomerProfile.business_name} berhasil didaftarkan! Stiker QR siap dicetak.`);

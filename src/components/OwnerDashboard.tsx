@@ -17,8 +17,17 @@ import {
   Phone,
   MapPin,
   Save,
-  Check
+  Check,
+  Cloud,
+  CloudUpload,
+  RefreshCw
 } from 'lucide-react';
+import { 
+  saveSettingsToFirebase, 
+  deleteProductFromFirebase, 
+  deleteCustomerFromFirebase,
+  uploadAllLocalDataToFirebase 
+} from '../services/firebaseSync';
 import { generateVerificationChecksum } from '../lib/security';
 import { searchFlatCatalog } from '../lib/catalogDb';
 import { useCatalogStore } from '../stores/catalogStore';
@@ -116,11 +125,26 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     }
   };
 
+  const [isUploadingCloud, setIsUploadingCloud] = useState(false);
+  const [cloudStatusMsg, setCloudStatusMsg] = useState<string | null>(null);
+
+  const handleUploadCloud = async () => {
+    setIsUploadingCloud(true);
+    setCloudStatusMsg('Mengunggah seluruh data ke Cloud Firebase...');
+    const result = await uploadAllLocalDataToFirebase();
+    setIsUploadingCloud(false);
+    if (result.success) {
+      setCloudStatusMsg(`✅ ${result.message} (${result.counts.products} produk, ${result.counts.customers} mitra)`);
+    } else {
+      setCloudStatusMsg(`❌ ${result.message}`);
+    }
+  };
+
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
     const { international, display } = cleanPhoneNumber(formPhone);
 
-    updateStoreSettings({
+    const payload = {
       storeName: formStoreName.trim() || 'PlastiPro',
       tagline: formTagline.trim(),
       phone: international,
@@ -131,6 +155,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       operationalHours: formHours.trim(),
       thermalFooterNote: formThermalNote.trim(),
       logoUrl: formLogoUrl
+    };
+
+    updateStoreSettings(payload);
+    saveSettingsToFirebase(payload).catch((err) => {
+      console.warn('Gagal sync settings ke Firebase:', err);
     });
 
     setSaveToast(true);
@@ -364,6 +393,51 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       <span>Pengaturan usaha & nomor WhatsApp berhasil disimpan dan aktif di seluruh web!</span>
                     </div>
                   )}
+
+                  {/* KARTU CLOUD: SINKRONISASI FIREBASE FIRESTORE */}
+                  <div className="bg-gradient-to-r from-sky-50 via-indigo-50 to-amber-50 p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center neo-border shadow-sm shrink-0">
+                          <Cloud className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h4 className="font-display font-black text-lg text-ink">
+                              Cloud Database Firebase (Firestore)
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-black flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                              Realtime
+                            </span>
+                          </div>
+                          <p className="text-xs text-slate-600 font-medium">
+                            Project ID: <strong className="font-mono text-ink">plastik-kan</strong> • Data toko, produk, dan mitra otomatis tersinkron ke semua perangkat.
+                          </p>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleUploadCloud}
+                        disabled={isUploadingCloud}
+                        className="px-5 py-3 bg-white hover:bg-slate-50 text-ink font-black text-xs sm:text-sm rounded-2xl neo-border shadow-sm flex items-center justify-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50 shrink-0"
+                      >
+                        {isUploadingCloud ? (
+                          <RefreshCw className="w-4 h-4 animate-spin text-primary" />
+                        ) : (
+                          <CloudUpload className="w-4 h-4 text-primary" />
+                        )}
+                        <span>{isUploadingCloud ? 'Sedang Mengunggah...' : 'Unggah Data Lokal ke Cloud'}</span>
+                      </button>
+                    </div>
+
+                    {cloudStatusMsg && (
+                      <div className="p-3 bg-white/90 rounded-xl border border-slate-300 text-xs font-bold text-slate-800 animate-fadeIn">
+                        {cloudStatusMsg}
+                      </div>
+                    )}
+                  </div>
 
                   {/* KARTU 1: IDENTITAS & LOGO */}
                   <div className="bg-white p-6 sm:p-8 rounded-3xl neo-border shadow-sm space-y-6">
@@ -690,6 +764,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             onClick={() => {
                               if (confirm(`Hapus produk "${p.name}"?`)) {
                                 deleteProduct(p.id);
+                                deleteProductFromFirebase(p.id).catch((err) => {
+                                  console.warn('Gagal hapus produk di Firebase:', err);
+                                });
                               }
                             }}
                             className="px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-1 transition-colors"
@@ -754,6 +831,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             onClick={() => {
                               if (confirm(`Hapus mitra "${c.business_name}"?`)) {
                                 deleteCustomer(c.id);
+                                deleteCustomerFromFirebase(c.id).catch((err) => {
+                                  console.warn('Gagal hapus customer di Firebase:', err);
+                                });
                               }
                             }}
                             className="text-xs text-red-600 hover:underline font-bold"

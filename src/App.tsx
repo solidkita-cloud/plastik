@@ -32,6 +32,7 @@ import { useCartStore } from './stores/cartStore';
 import { useCatalogStore } from './stores/catalogStore';
 import { useSettingsStore } from './stores/settingsStore';
 import { useCustomerStore } from './stores/customerStore';
+import { startFirebaseRealtimeSync, stopFirebaseRealtimeSync } from './services/firebaseSync';
 
 export const App: React.FC = () => {
   const products = useCatalogStore((state) => state.products);
@@ -64,6 +65,14 @@ export const App: React.FC = () => {
   useEffect(() => {
     initCatalogIndex(products);
   }, [products]);
+
+  // Activate Cloud Firebase Realtime Sync
+  useEffect(() => {
+    startFirebaseRealtimeSync();
+    return () => {
+      stopFirebaseRealtimeSync();
+    };
+  }, []);
 
   // Real QR Scan URL auto-detection (?token=... or ?reorder=...)
   useEffect(() => {

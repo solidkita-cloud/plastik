@@ -12,6 +12,7 @@ import {
 import { Product, ProductVariant, VariantUnit } from '../types';
 import { CATEGORIES } from '../lib/constants';
 import { useCatalogStore } from '../stores/catalogStore';
+import { saveProductToFirebase } from '../services/firebaseSync';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -197,6 +198,9 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
     };
 
     addProduct(newProduct);
+    saveProductToFirebase(newProduct).catch((err) => {
+      console.warn('Gagal sync produk ke Firebase:', err);
+    });
     onSuccess(newProduct.name);
     onClose();
   };
