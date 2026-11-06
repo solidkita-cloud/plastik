@@ -117,6 +117,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     ]
   });
 
+  // Cloud Firebase upload state (Must be declared before any early return)
+  const [isUploadingCloud, setIsUploadingCloud] = useState(false);
+  const [cloudStatusMsg, setCloudStatusMsg] = useState<string | null>(null);
+
   if (!isOpen) return null;
 
   const handleLogin = (e: React.FormEvent) => {
@@ -139,9 +143,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       reader.readAsDataURL(file);
     }
   };
-
-  const [isUploadingCloud, setIsUploadingCloud] = useState(false);
-  const [cloudStatusMsg, setCloudStatusMsg] = useState<string | null>(null);
 
   const handleUploadCloud = async () => {
     setIsUploadingCloud(true);
