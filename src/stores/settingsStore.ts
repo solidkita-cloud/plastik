@@ -37,8 +37,9 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   thermalFooterNote: 'Barang yang sudah dibeli dapat ditukar jika ada cacat pabrik maksimal 2 hari.'
 };
 
-export function cleanPhoneNumber(raw: string): { international: string; display: string } {
-  let cleaned = raw.replace(/\D/g, '');
+export function cleanPhoneNumber(raw?: string | null): { international: string; display: string } {
+  const safe = typeof raw === 'string' ? raw : (raw ? String(raw) : '');
+  let cleaned = safe.replace(/\D/g, '');
   if (cleaned.startsWith('0')) {
     cleaned = '62' + cleaned.substring(1);
   } else if (!cleaned.startsWith('62') && cleaned.length > 0) {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Lock, 
@@ -62,17 +62,32 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const customers = useCustomerStore((state) => state.customers);
   const deleteCustomer = useCustomerStore((state) => state.deleteCustomer);
 
-  // Settings Local Form State (Spacious & Comfortable)
-  const [formStoreName, setFormStoreName] = useState(storeSettings.storeName);
-  const [formTagline, setFormTagline] = useState(storeSettings.tagline);
-  const [formPhone, setFormPhone] = useState(storeSettings.phoneDisplay || storeSettings.phone);
-  const [formAddress, setFormAddress] = useState(storeSettings.address);
-  const [formCity, setFormCity] = useState(storeSettings.city);
-  const [formLandmark, setFormLandmark] = useState(storeSettings.landmark);
-  const [formHours, setFormHours] = useState(storeSettings.operationalHours);
-  const [formThermalNote, setFormThermalNote] = useState(storeSettings.thermalFooterNote);
-  const [formLogoUrl, setFormLogoUrl] = useState<string | null>(storeSettings.logoUrl);
+  // Settings Local Form State (Spacious & Comfortable with Safe Defaults)
+  const [formStoreName, setFormStoreName] = useState(storeSettings.storeName || 'PlastiPro');
+  const [formTagline, setFormTagline] = useState(storeSettings.tagline || '');
+  const [formPhone, setFormPhone] = useState(storeSettings.phoneDisplay || storeSettings.phone || '0812-3456-7890');
+  const [formAddress, setFormAddress] = useState(storeSettings.address || '');
+  const [formCity, setFormCity] = useState(storeSettings.city || '');
+  const [formLandmark, setFormLandmark] = useState(storeSettings.landmark || '');
+  const [formHours, setFormHours] = useState(storeSettings.operationalHours || '');
+  const [formThermalNote, setFormThermalNote] = useState(storeSettings.thermalFooterNote || '');
+  const [formLogoUrl, setFormLogoUrl] = useState<string | null>(storeSettings.logoUrl || null);
   const [saveToast, setSaveToast] = useState(false);
+
+  // Sync settings whenever storeSettings updates
+  useEffect(() => {
+    if (storeSettings) {
+      setFormStoreName(storeSettings.storeName || 'PlastiPro');
+      setFormTagline(storeSettings.tagline || '');
+      setFormPhone(storeSettings.phoneDisplay || storeSettings.phone || '0812-3456-7890');
+      setFormAddress(storeSettings.address || '');
+      setFormCity(storeSettings.city || '');
+      setFormLandmark(storeSettings.landmark || '');
+      setFormHours(storeSettings.operationalHours || '');
+      setFormThermalNote(storeSettings.thermalFooterNote || '');
+      setFormLogoUrl(storeSettings.logoUrl || null);
+    }
+  }, [storeSettings]);
 
   // Thermal test print modal state
   const [isTestThermalOpen, setIsTestThermalOpen] = useState(false);
@@ -747,13 +762,13 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           />
                           <div className="min-w-0">
                             <span className="text-[10px] font-extrabold px-2 py-0.5 rounded bg-sky-100 text-primary">
-                              {p.material} • {p.variants.length} Ukuran
+                              {p.material || 'PP'} • {p.variants?.length || 0} Ukuran
                             </span>
                             <h5 className="font-extrabold text-sm text-ink truncate mt-1">
                               {p.name}
                             </h5>
                             <span className="text-xs font-black text-accent block mt-0.5">
-                              Rp {p.variants[0]?.units[0]?.price.toLocaleString('id-ID')} / {p.variants[0]?.units[0]?.unit_code}
+                              Rp {(p.variants?.[0]?.units?.[0]?.price ?? 0).toLocaleString('id-ID')} / {p.variants?.[0]?.units?.[0]?.unit_code || 'Pcs'}
                             </span>
                           </div>
                         </div>
@@ -885,7 +900,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       <div className="text-xs text-slate-700 space-y-1 pt-2">
                         <div>No. Pesanan: <strong>{verificationResult.orderNumber}</strong></div>
                         <div>Mitra: <strong>{verificationResult.customer}</strong></div>
-                        <div>Total Tagihan: <strong>Rp {verificationResult.totalAmount?.toLocaleString('id-ID')}</strong></div>
+                        <div>Total Tagihan: <strong>Rp {(verificationResult.totalAmount ?? 0).toLocaleString('id-ID')}</strong></div>
                       </div>
                     </div>
                   )}
