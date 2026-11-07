@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { useCartStore } from '../stores/cartStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { useSalesStore } from '../stores/salesStore';
+import { saveOrderToFirebase } from '../services/firebaseSync';
 import { sanitizeNote, generateVerificationChecksum } from '../lib/security';
 import { generateInvoicePDF } from '../lib/pdfGenerator';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
@@ -43,6 +45,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
   const getSubtotal = useCartStore((state) => state.getSubtotal);
   const getTotalQty = useCartStore((state) => state.getTotalQty);
   const getTotalWeightKg = useCartStore((state) => state.getTotalWeightKg);
+  const recordCheckoutOrder = useSalesStore((state) => state.recordCheckoutOrder);
 
   const [guestName, setGuestName] = useState('');
   const [guestPhone, setGuestPhone] = useState('');
@@ -131,6 +134,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       text += `\n🔒 *KODE INTEGRITAS:* [VERIF: ${code}]\n`;
       text += `_Mohon info ketersediaan stok & nomor rekening pembayaran. Terima kasih!_`;
 
+      // Record Sales Order to Analytics & Cloud
+      try {
+        const recordedOrder = recordCheckoutOrder({
+          items,
+          customerName,
+          customerPhone,
+          customerId: customer?.id,
+          deliveryMethod: deliveryLabels[deliveryMethod] || 'Kurir Toko',
+          source: customer?.qr_token ? 'qr_reorder' : 'whatsapp_checkout'
+        });
+        saveOrderToFirebase(recordedOrder).catch((e) => console.warn('Sync order to Firebase error:', e));
+      } catch (recErr) {
+        console.warn('Gagal record sales order:', recErr);
+      }
+
       const encodedUrl = `https://wa.me/${storeSettings.phone}?text=${encodeURIComponent(text)}`;
       window.open(encodedUrl, '_blank');
     } catch (err) {
@@ -169,6 +187,21 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       totalWeightKg,
       verificationCode: code
     });
+
+    // Record POS Thermal receipt order
+    try {
+      const recordedOrder = recordCheckoutOrder({
+        items,
+        customerName: customer?.business_name || guestName || 'Pelanggan Toko Fisik',
+        customerPhone: customer?.phone_number || guestPhone || '-',
+        customerId: customer?.id,
+        deliveryMethod: deliveryLabels[deliveryMethod] || 'Ambil di Toko Fisik',
+        source: 'pos_thermal'
+      });
+      saveOrderToFirebase(recordedOrder).catch((e) => console.warn('Sync thermal order error:', e));
+    } catch (recErr) {
+      console.warn('Gagal record thermal order:', recErr);
+    }
 
     setIsThermalOpen(true);
   };

@@ -587,7 +587,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                           key={u.id}
                           className="p-4 bg-white rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center shadow-sm"
                         >
-                          <div className="sm:col-span-3">
+                          <div className="sm:col-span-2">
                             <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
                               Satuan:
                             </label>
@@ -598,7 +598,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                                 updated[vIdx].units[uIdx].unit_code = e.target.value as any;
                                 setVariants(updated);
                               }}
-                              className="w-full h-10 px-2.5 text-xs font-bold rounded-lg border border-slate-300 bg-slate-50"
+                              className="w-full h-10 px-2 text-xs font-bold rounded-lg border border-slate-300 bg-slate-50"
                             >
                               <option value="PCS">PCS (Ecer)</option>
                               <option value="PAK">PAK (Bungkus)</option>
@@ -609,7 +609,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                             </select>
                           </div>
 
-                          <div className="sm:col-span-4">
+                          <div className="sm:col-span-3">
                             <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
                               Nama Label Satuan:
                             </label>
@@ -628,7 +628,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
                           <div className="sm:col-span-2">
                             <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
-                              Isi Multiplier (Pcs):
+                              Isi (Pcs):
                             </label>
                             <input
                               type="number"
@@ -645,7 +645,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
                           <div className="sm:col-span-2">
                             <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
-                              Harga Jual (Rp):
+                              Harga Jual:
                             </label>
                             <input
                               type="number"
@@ -658,6 +658,25 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                                 setVariants(updated);
                               }}
                               className="w-full h-10 px-3 text-xs font-extrabold text-accent rounded-lg border border-slate-300"
+                            />
+                          </div>
+
+                          <div className="sm:col-span-2">
+                            <label className="block text-[11px] font-bold text-emerald-700 mb-0.5" title="Harga Beli dari Pabrik">
+                              Modal HPP:
+                            </label>
+                            <input
+                              type="number"
+                              step={500}
+                              min={0}
+                              placeholder="Otomatis ~72%"
+                              value={u.cogs_price || ''}
+                              onChange={(e) => {
+                                const updated = [...variants];
+                                updated[vIdx].units[uIdx].cogs_price = Number(e.target.value) || 0;
+                                setVariants(updated);
+                              }}
+                              className="w-full h-10 px-2.5 text-xs font-bold text-emerald-700 rounded-lg border border-emerald-300 bg-emerald-50/40"
                             />
                           </div>
 

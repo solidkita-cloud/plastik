@@ -20,7 +20,8 @@ import {
   Check,
   Cloud,
   CloudUpload,
-  RefreshCw
+  RefreshCw,
+  BarChart3
 } from 'lucide-react';
 import { 
   saveSettingsToFirebase, 
@@ -34,6 +35,7 @@ import { useCatalogStore } from '../stores/catalogStore';
 import { useSettingsStore, cleanPhoneNumber } from '../stores/settingsStore';
 import { useCustomerStore } from '../stores/customerStore';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
+import { AnalyticsDashboard } from './AnalyticsDashboard';
 
 interface OwnerDashboardProps {
   isOpen: boolean;
@@ -48,7 +50,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 }) => {
   const [pin, setPin] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [activeTab, setActiveTab] = useState<'settings' | 'inventory' | 'customers' | 'verify' | 'agents'>('settings');
+  const [activeTab, setActiveTab] = useState<'analytics' | 'settings' | 'inventory' | 'customers' | 'verify' | 'agents'>('analytics');
 
   // Stores
   const products = useCatalogStore((state) => state.products);
@@ -150,7 +152,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     const result = await uploadAllLocalDataToFirebase();
     setIsUploadingCloud(false);
     if (result.success) {
-      setCloudStatusMsg(`✅ ${result.message} (${result.counts.products} produk, ${result.counts.customers} mitra)`);
+      setCloudStatusMsg(`✅ ${result.message} (${result.counts.products} produk, ${result.counts.customers} mitra, ${result.counts.orders} transaksi)`);
     } else {
       setCloudStatusMsg(`❌ ${result.message}`);
     }
@@ -335,6 +337,18 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             {/* Top Navigation Bar / Tabs */}
             <div className="flex items-center gap-2 px-6 sm:px-8 py-3.5 bg-slate-100 border-b border-slate-200 overflow-x-auto no-scrollbar shrink-0">
               <button
+                onClick={() => setActiveTab('analytics')}
+                className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
+                  activeTab === 'analytics'
+                    ? 'bg-primary text-white neo-border shadow-sm'
+                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                <span>📊 Laporan & Keuntungan</span>
+              </button>
+
+              <button
                 onClick={() => setActiveTab('settings')}
                 className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
                   activeTab === 'settings'
@@ -398,6 +412,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             {/* Tab Contents - Spacious, Scrollable */}
             <div className="flex-1 p-6 sm:p-8 overflow-y-auto bg-slate-50/60">
               
+              {/* TAB 0: ANALISIS PENJUALAN & LABA KEUNTUNGAN */}
+              {activeTab === 'analytics' && <AnalyticsDashboard />}
+
               {/* TAB 1: PENGATURAN USAHA & LOGO (SPACIOUS, COMFORTABLE) */}
               {activeTab === 'settings' && (
                 <form onSubmit={handleSaveSettings} className="space-y-8 max-w-4xl mx-auto">

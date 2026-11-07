@@ -58,14 +58,19 @@ export const useCartStore = create<CartState>((set, get) => ({
       qty: newItem.qty
     });
 
+    const itemWithCogs: CartItem = {
+      ...newItem,
+      cogs_price: newItem.cogs_price ?? Math.round(newItem.price * 0.72)
+    };
+
     set((state) => {
-      const existingIndex = state.items.findIndex((i) => i.unit_id === newItem.unit_id);
+      const existingIndex = state.items.findIndex((i) => i.unit_id === itemWithCogs.unit_id);
       if (existingIndex > -1) {
         const updated = [...state.items];
-        updated[existingIndex].qty += newItem.qty;
+        updated[existingIndex].qty += itemWithCogs.qty;
         return { items: updated };
       }
-      return { items: [...state.items, newItem] };
+      return { items: [...state.items, itemWithCogs] };
     });
   },
 

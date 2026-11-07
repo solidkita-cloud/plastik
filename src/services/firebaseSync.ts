@@ -10,12 +10,14 @@ import { db } from '../lib/firebase';
 import { useSettingsStore, StoreSettings } from '../stores/settingsStore';
 import { useCatalogStore } from '../stores/catalogStore';
 import { useCustomerStore } from '../stores/customerStore';
-import { Product, CustomerProfile } from '../types';
+import { useSalesStore } from '../stores/salesStore';
+import { Product, CustomerProfile, SalesOrder } from '../types';
 
 let isListening = false;
 let unsubscribeSettings: (() => void) | null = null;
 let unsubscribeProducts: (() => void) | null = null;
 let unsubscribeCustomers: (() => void) | null = null;
+let unsubscribeOrders: (() => void) | null = null;
 
 /**
  * Memulai sinkronisasi realtime dari Firebase Firestore ke local store.
@@ -85,6 +87,24 @@ export function startFirebaseRealtimeSync(onStatusChange?: (status: {
       console.warn('Firebase Customers snapshot error:', error);
     });
 
+    // 4. Listen ke Data Transaksi Penjualan (Orders)
+    const ordersRef = collection(db, 'orders');
+    unsubscribeOrders = onSnapshot(ordersRef, (snapshot) => {
+      if (!snapshot.empty) {
+        const cloudOrders: SalesOrder[] = [];
+        snapshot.forEach((docSnap) => {
+          cloudOrders.push(docSnap.data() as SalesOrder);
+        });
+
+        if (cloudOrders.length > 0) {
+          useSalesStore.setState({ orders: cloudOrders });
+          localStorage.setItem('plastipro_sales_orders_v1', JSON.stringify(cloudOrders));
+        }
+      }
+    }, (error) => {
+      console.warn('Firebase Orders snapshot error:', error);
+    });
+
     onStatusChange?.({
       connected: true,
       message: 'Sinkronisasi Realtime Aktif',
@@ -106,6 +126,7 @@ export function stopFirebaseRealtimeSync() {
   if (unsubscribeSettings) unsubscribeSettings();
   if (unsubscribeProducts) unsubscribeProducts();
   if (unsubscribeCustomers) unsubscribeCustomers();
+  if (unsubscribeOrders) unsubscribeOrders();
   isListening = false;
 }
 
@@ -182,17 +203,33 @@ export async function deleteCustomerFromFirebase(customerId: string): Promise<bo
 }
 
 /**
- * Upload seluruh data lokal saat ini (Pengaturan, Katalog, Mitra) ke Cloud Firebase sekaligus
+ * Simpan data transaksi penjualan ke Firebase
+ */
+export async function saveOrderToFirebase(order: SalesOrder): Promise<boolean> {
+  try {
+    const orderRef = doc(db, 'orders', order.id);
+    const cleanData = JSON.parse(JSON.stringify(order));
+    await setDoc(orderRef, cleanData);
+    return true;
+  } catch (error) {
+    console.error('Gagal menyimpan order ke Firebase:', error);
+    return false;
+  }
+}
+
+/**
+ * Upload seluruh data lokal saat ini (Pengaturan, Katalog, Mitra, Penjualan) ke Cloud Firebase sekaligus
  */
 export async function uploadAllLocalDataToFirebase(): Promise<{
   success: boolean;
   message: string;
-  counts: { products: number; customers: number };
+  counts: { products: number; customers: number; orders: number };
 }> {
   try {
     const currentSettings = useSettingsStore.getState();
     const currentProducts = useCatalogStore.getState().products;
     const currentCustomers = useCustomerStore.getState().customers;
+    const currentOrders = useSalesStore.getState().orders;
 
     // 1. Upload settings
     const settingsRef = doc(db, 'settings', 'general');
@@ -225,14 +262,21 @@ export async function uploadAllLocalDataToFirebase(): Promise<{
       batch.set(cRef, c);
     });
 
+    // 4. Upload orders (up to 500 limit for a batch)
+    currentOrders.slice(0, 50).forEach((ord) => {
+      const ordRef = doc(db, 'orders', ord.id);
+      batch.set(ordRef, JSON.parse(JSON.stringify(ord)));
+    });
+
     await batch.commit();
 
     return {
       success: true,
-      message: 'Berhasil mengunggah seluruh data toko, produk, dan mitra ke Cloud Firebase!',
+      message: 'Berhasil mengunggah seluruh data toko, produk, mitra, dan riwayat penjualan ke Cloud Firebase!',
       counts: {
         products: currentProducts.length,
-        customers: currentCustomers.length
+        customers: currentCustomers.length,
+        orders: currentOrders.length
       }
     };
   } catch (error: any) {
@@ -240,7 +284,7 @@ export async function uploadAllLocalDataToFirebase(): Promise<{
     return {
       success: false,
       message: error?.message || 'Gagal mengunggah data ke Cloud Firebase.',
-      counts: { products: 0, customers: 0 }
+      counts: { products: 0, customers: 0, orders: 0 }
     };
   }
 }

@@ -19,6 +19,7 @@ export interface VariantUnit {
   unit_name: string; // e.g. "Pcs", "Pak (Isi 25)", "Dus/Karton (Isi 500)"
   base_multiplier: number; // e.g. 1, 25, 500
   price: number; // Default retail price
+  cogs_price?: number; // Cost of goods sold / Harga Modal Pabrik
   wholesale_price?: number; // Optional wholesale tier price
   min_order_qty: number;
   step_qty: number;
@@ -67,6 +68,7 @@ export interface CartItem {
   base_multiplier: number;
   sku: string;
   price: number;
+  cogs_price?: number;
   qty: number;
   weight_grams: number;
 }
@@ -87,3 +89,38 @@ export interface CustomerProfile {
     items: CartItem[];
   };
 }
+
+// Sales & Analytics Types
+export interface OrderItemRecord {
+  product_id: string;
+  product_name: string;
+  category_id?: string;
+  variant_id: string;
+  variant_name: string;
+  unit_code: string;
+  unit_name: string;
+  qty: number;
+  sell_price: number;
+  cogs_price: number; // Modal / HPP
+  subtotal: number;
+  profit: number; // (sell_price - cogs_price) * qty
+}
+
+export interface SalesOrder {
+  id: string;
+  order_number: string;
+  created_at: string; // ISO 8601 string
+  customer_name: string;
+  customer_phone: string;
+  customer_id?: string;
+  delivery_method: string;
+  items: OrderItemRecord[];
+  total_qty: number;
+  total_omzet: number;
+  total_cogs: number;
+  total_profit: number;
+  profit_margin_pct: number;
+  status: 'completed' | 'pending' | 'cancelled';
+  source: 'whatsapp_checkout' | 'pos_thermal' | 'qr_reorder';
+}
+
