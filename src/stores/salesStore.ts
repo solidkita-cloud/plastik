@@ -13,6 +13,7 @@ interface SalesState {
     source: 'whatsapp_checkout' | 'pos_thermal' | 'qr_reorder';
   }) => SalesOrder;
   deleteOrder: (id: string) => void;
+  clearAllOrders: () => void;
   resetToDemoOrders: () => void;
 }
 
@@ -571,6 +572,11 @@ export const useSalesStore = create<SalesState>((set, get) => {
         saveOrders(updated);
         return { orders: updated };
       });
+    },
+
+    clearAllOrders: () => {
+      saveOrders([]);
+      set({ orders: [] });
     },
 
     resetToDemoOrders: () => {

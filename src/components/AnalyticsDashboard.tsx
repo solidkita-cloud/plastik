@@ -7,7 +7,12 @@ import {
   Download, 
   BarChart3,
   Flame,
-  Gem
+  Gem,
+  AlertTriangle,
+  Trash2,
+  RotateCcw,
+  X,
+  Check
 } from 'lucide-react';
 import { useSalesStore } from '../stores/salesStore';
 import { SalesOrder } from '../types';
@@ -18,10 +23,16 @@ type ProductRankTab = 'profit' | 'volume' | 'omzet';
 export const AnalyticsDashboard: React.FC = () => {
   const orders = useSalesStore((state) => state.orders);
   const resetToDemoOrders = useSalesStore((state) => state.resetToDemoOrders);
+  const clearAllOrders = useSalesStore((state) => state.clearAllOrders);
 
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('week');
   const [productTab, setProductTab] = useState<ProductRankTab>('profit');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
+
+  // Modal Confirmation States
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [isResetDemoModalOpen, setIsResetDemoModalOpen] = useState(false);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   // Filter orders by time range
   const filteredOrders = useMemo(() => {
@@ -437,49 +448,59 @@ export const AnalyticsDashboard: React.FC = () => {
         </div>
 
         {/* Visual Bar Chart */}
-        <div className="pt-4">
-          <div className="grid grid-flow-col auto-cols-fr gap-2 sm:gap-4 items-end h-56 pt-6 pb-2 border-b-2 border-slate-200 px-2">
-            {dailyTrend.entries.map((day, idx) => {
-              const omzetHeight = Math.max(Math.round((day.omzet / dailyTrend.maxVal) * 100), 4);
-              const profitHeight = Math.max(Math.round((day.profit / dailyTrend.maxVal) * 100), 4);
-
-              return (
-                <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
-                  
-                  {/* Tooltip on Hover */}
-                  <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[11px] rounded-xl p-2.5 shadow-xl pointer-events-none z-20 whitespace-nowrap min-w-[130px] border border-slate-700">
-                    <strong className="block text-amber-300 font-extrabold">{day.label}</strong>
-                    <div>Omzet: <strong>Rp {day.omzet.toLocaleString('id-ID')}</strong></div>
-                    <div>Laba: <strong className="text-emerald-400">Rp {day.profit.toLocaleString('id-ID')}</strong></div>
-                    <div className="text-[10px] text-slate-400">{day.count} pesanan</div>
-                  </div>
-
-                  {/* Dual Bars Container */}
-                  <div className="flex items-end gap-1 sm:gap-2 w-full justify-center h-full">
-                    {/* Omzet Bar */}
-                    <div 
-                      style={{ height: `${omzetHeight}%` }}
-                      className="w-full max-w-[18px] bg-primary rounded-t-lg transition-all duration-300 group-hover:bg-primary-dark group-hover:scale-y-105 origin-bottom"
-                      title={`Omzet: Rp ${day.omzet.toLocaleString('id-ID')}`}
-                    />
-
-                    {/* Profit Bar */}
-                    <div 
-                      style={{ height: `${profitHeight}%` }}
-                      className="w-full max-w-[18px] bg-eco rounded-t-lg transition-all duration-300 group-hover:bg-eco-dark group-hover:scale-y-105 origin-bottom"
-                      title={`Laba: Rp ${day.profit.toLocaleString('id-ID')}`}
-                    />
-                  </div>
-
-                  {/* X-Axis Date Label */}
-                  <span className="text-[10px] sm:text-xs font-bold text-slate-500 mt-2 truncate max-w-full text-center">
-                    {day.label}
-                  </span>
-                </div>
-              );
-            })}
+        {filteredOrders.length === 0 ? (
+          <div className="py-14 text-center space-y-2 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 my-2">
+            <ShoppingBag className="w-10 h-10 text-slate-300 mx-auto" />
+            <h5 className="font-extrabold text-slate-600 text-sm">Belum Ada Transaksi Penjualan</h5>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              Pembukuan saat ini kosong (0 transaksi). Setiap kali pelanggan checkout via WhatsApp atau kasir mencetak struk 58mm, grafik dan rincian laba akan langsung otomatis muncul di sini.
+            </p>
           </div>
-        </div>
+        ) : (
+          <div className="pt-4">
+            <div className="grid grid-flow-col auto-cols-fr gap-2 sm:gap-4 items-end h-56 pt-6 pb-2 border-b-2 border-slate-200 px-2">
+              {dailyTrend.entries.map((day, idx) => {
+                const omzetHeight = Math.max(Math.round((day.omzet / dailyTrend.maxVal) * 100), 4);
+                const profitHeight = Math.max(Math.round((day.profit / dailyTrend.maxVal) * 100), 4);
+
+                return (
+                  <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
+                    
+                    {/* Tooltip on Hover */}
+                    <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[11px] rounded-xl p-2.5 shadow-xl pointer-events-none z-20 whitespace-nowrap min-w-[130px] border border-slate-700">
+                      <strong className="block text-amber-300 font-extrabold">{day.label}</strong>
+                      <div>Omzet: <strong>Rp {day.omzet.toLocaleString('id-ID')}</strong></div>
+                      <div>Laba: <strong className="text-emerald-400">Rp {day.profit.toLocaleString('id-ID')}</strong></div>
+                      <div className="text-[10px] text-slate-400">{day.count} pesanan</div>
+                    </div>
+
+                    {/* Dual Bars Container */}
+                    <div className="flex items-end gap-1 sm:gap-2 w-full justify-center h-full">
+                      {/* Omzet Bar */}
+                      <div 
+                        style={{ height: `${omzetHeight}%` }}
+                        className="w-full max-w-[18px] bg-primary rounded-t-lg transition-all duration-300 group-hover:bg-primary-dark group-hover:scale-y-105 origin-bottom"
+                        title={`Omzet: Rp ${day.omzet.toLocaleString('id-ID')}`}
+                      />
+
+                      {/* Profit Bar */}
+                      <div 
+                        style={{ height: `${profitHeight}%` }}
+                        className="w-full max-w-[18px] bg-eco rounded-t-lg transition-all duration-300 group-hover:bg-eco-dark group-hover:scale-y-105 origin-bottom"
+                        title={`Laba: Rp ${day.profit.toLocaleString('id-ID')}`}
+                      />
+                    </div>
+
+                    {/* X-Axis Date Label */}
+                    <span className="text-[10px] sm:text-xs font-bold text-slate-500 mt-2 truncate max-w-full text-center">
+                      {day.label}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 4. DUA KOLOM: LEADERBOARD PRODUK & DATA PENJUALAN PER CUSTOMER */}
@@ -670,23 +691,149 @@ export const AnalyticsDashboard: React.FC = () => {
 
       </div>
 
-      {/* 5. RESET DEMO DATA HELPER (FOR OWNER TESTING) */}
-      <div className="flex items-center justify-between p-4 bg-slate-100 rounded-2xl border border-slate-200 text-xs text-slate-500">
-        <div>
-          <strong className="text-ink">Uji Coba Data Pembukuan:</strong> Transaksi otomatis tercatat saat pembeli checkout WhatsApp atau kasir mencetak struk thermal 58mm.
+      {/* Action Notification Toast */}
+      {actionNotice && (
+        <div className="p-4 bg-emerald-500 text-white font-extrabold text-sm rounded-2xl shadow-md flex items-center justify-between animate-fadeIn">
+          <div className="flex items-center gap-2.5">
+            <Check className="w-5 h-5 shrink-0" />
+            <span>{actionNotice}</span>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => setActionNotice(null)}
+            className="p-1 hover:bg-emerald-600 rounded-lg"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            if (confirm('Muat ulang data simulasi penjualan 30 hari terakhir?')) {
-              resetToDemoOrders();
-            }
-          }}
-          className="text-xs font-bold text-primary hover:underline shrink-0"
-        >
-          Reset Data Simulasi
-        </button>
+      )}
+
+      {/* 5. DATA MANAGEMENT ACTIONS (HAPUS TOTAL ATAU MUAT DATA CONTOH) */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-slate-100 rounded-3xl border border-slate-200">
+        <div>
+          <strong className="text-ink text-sm block">Manajemen Pembukuan Transaksi:</strong>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Saat ini ada <strong>{orders.length} total transaksi</strong> di database. Kosongkan jika Anda ingin mulai mencatat transaksi asli toko.
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setIsResetDemoModalOpen(true)}
+            className="px-4 py-2.5 bg-white hover:bg-slate-200 text-slate-700 text-xs font-black rounded-xl border border-slate-300 flex items-center gap-1.5 transition-all shadow-sm"
+          >
+            <RotateCcw className="w-4 h-4 text-primary" />
+            <span>Muat Data Contoh</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsClearModalOpen(true)}
+            className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl border-2 border-red-800 flex items-center gap-1.5 transition-all shadow-sm active:translate-x-0.5 active:translate-y-0.5"
+          >
+            <Trash2 className="w-4 h-4" />
+            <span>Hapus / Kosongkan Transaksi</span>
+          </button>
+        </div>
       </div>
+
+      {/* MODAL KONFIRMASI: YAKIN NIH MAU DIHAPUS? */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+          <div 
+            className="bg-white max-w-md w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-8 space-y-5 animate-scaleUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto border-2 border-red-300">
+              <AlertTriangle className="w-9 h-9" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <h3 className="font-display font-black text-2xl text-ink tracking-tight text-red-600">
+                YAKIN NIH MAU DIHAPUS?
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
+                Semua <strong>{orders.length} data riwayat transaksi penjualan</strong> akan <strong>dihapus permanen (menjadi 0 transaksi)</strong>.
+              </p>
+              <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-xs text-red-700 font-bold text-left">
+                ⚠️ Grafik, total omzet, dan rincian laba akan bersih kembali ke Rp 0 untuk siap mencatat transaksi riil dari pembeli toko Anda.
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsClearModalOpen(false)}
+                className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs sm:text-sm border border-slate-300 transition-all"
+              >
+                Batal / Simpan Data
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  clearAllOrders();
+                  setIsClearModalOpen(false);
+                  setActionNotice('Semua data riwayat transaksi berhasil dihapus! Pembukuan toko kini bersih (0 transaksi).');
+                  setTimeout(() => setActionNotice(null), 5000);
+                }}
+                className="py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs sm:text-sm neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-1.5"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Ya, Hapus Data!</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL KONFIRMASI: MUAT ULANG CONTOH DATA SIMULASI */}
+      {isResetDemoModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+          <div 
+            className="bg-white max-w-md w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-8 space-y-5 animate-scaleUp"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-16 h-16 rounded-2xl bg-sky-100 text-primary flex items-center justify-center mx-auto border-2 border-sky-300">
+              <RotateCcw className="w-9 h-9" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <h3 className="font-display font-black text-2xl text-ink tracking-tight text-primary">
+                Muat Data Contoh Simulasi?
+              </h3>
+              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
+                Sistem akan mengisi kembali 10 data transaksi contoh (Warung Geprek, Kopi Janji Manis, dll.) selama 30 hari terakhir agar grafik dan analisis dapat diuji coba.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsResetDemoModalOpen(false)}
+                className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs sm:text-sm border border-slate-300 transition-all"
+              >
+                Batal
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  resetToDemoOrders();
+                  setIsResetDemoModalOpen(false);
+                  setActionNotice('Data contoh simulasi 30 hari berhasil dimuat!');
+                  setTimeout(() => setActionNotice(null), 5000);
+                }}
+                className="py-3 px-4 bg-primary hover:bg-primary-dark text-white rounded-xl font-black text-xs sm:text-sm neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-1.5"
+              >
+                <Check className="w-4 h-4" />
+                <span>Muat Data Contoh</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
