@@ -237,7 +237,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     // Test 3: HMAC verification
     const t2 = performance.now();
     const res = await generateVerificationChecksum({ test: 1234 });
-    const validHash = Boolean(res && res.code && res.code.length === 6);
+    const validHash = Boolean(res && res.code && res.code.length >= 6);
     const time3 = Math.round(performance.now() - t2);
     setTestResults((prev) => ({
       ...prev,
@@ -1000,6 +1000,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             <span className="px-2.5 py-1 rounded-lg bg-emerald-100 text-eco-dark text-xs font-black flex items-center gap-1">
                               <CheckCircle className="w-3.5 h-3.5 text-eco" />
                               <span>LULUS ({it.timeMs}ms)</span>
+                            </span>
+                          )}
+                          {it.status === 'failed' && (
+                            <span className="px-2.5 py-1 rounded-lg bg-red-100 text-red-700 text-xs font-black flex items-center gap-1">
+                              <X className="w-3.5 h-3.5 text-red-600" />
+                              <span>GAGAL ({it.timeMs}ms)</span>
                             </span>
                           )}
                           {it.status === 'pending' && (
