@@ -181,7 +181,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     });
 
     setSaveToast(true);
-    setTimeout(() => setSaveToast(false), 3000);
+    setTimeout(() => setSaveToast(false), 6000);
   };
 
   const handleVerifyCode = (e: React.FormEvent) => {
@@ -292,6 +292,25 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             <X className="w-6 h-6" />
           </button>
         </div>
+
+        {/* Floating Top Notification Banner when Settings Saved */}
+        {saveToast && (
+          <div className="bg-emerald-600 text-white px-6 py-3.5 flex items-center justify-between border-b-2 border-emerald-800 shadow-md animate-slideDown shrink-0">
+            <div className="flex items-center gap-2.5">
+              <Check className="w-5 h-5 shrink-0 animate-bounce" />
+              <span className="font-extrabold text-xs sm:text-sm">
+                ✅ PENGATURAN TOKO BERHASIL DISIMPAN & AKTIF DI SELURUH WEB!
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSaveToast(false)}
+              className="p-1 hover:bg-emerald-700 rounded-lg text-emerald-100 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
 
         {/* PIN Authentication Screen (if not logged in) */}
         {!isAuthenticated ? (
@@ -700,6 +719,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     </div>
                   </div>
 
+                  {/* Prominent Success Feedback Banner at Bottom */}
+                  {saveToast && (
+                    <div className="p-4 sm:p-5 bg-emerald-600 text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-hard flex items-center justify-center gap-3 animate-fadeIn border-2 border-emerald-800">
+                      <Check className="w-6 h-6 shrink-0 animate-bounce" />
+                      <span>✅ PENGATURAN TOKO BERHASIL DISIMPAN & AKTIF DI SELURUH WEB!</span>
+                    </div>
+                  )}
+
                   {/* Action Buttons: Save & Reset */}
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-slate-300">
                     <button
@@ -719,10 +746,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                     <button
                       type="submit"
-                      className="w-full sm:w-auto px-10 py-4 bg-primary hover:bg-primary-dark text-white font-black text-base rounded-2xl neo-border-thick neo-shadow transition-all flex items-center justify-center gap-2.5 active:translate-x-0.5 active:translate-y-0.5"
+                      className={`w-full sm:w-auto px-10 py-4 font-black text-base rounded-2xl neo-border-thick neo-shadow transition-all flex items-center justify-center gap-2.5 active:translate-x-0.5 active:translate-y-0.5 ${
+                        saveToast 
+                          ? 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-hard-accent ring-4 ring-emerald-200' 
+                          : 'bg-primary hover:bg-primary-dark text-white'
+                      }`}
                     >
-                      <Save className="w-5 h-5" />
-                      <span>Simpan Seluruh Pengaturan Toko</span>
+                      {saveToast ? (
+                        <>
+                          <Check className="w-6 h-6 animate-pulse" />
+                          <span>✅ Berhasil Disimpan & Aktif!</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-5 h-5" />
+                          <span>Simpan Seluruh Pengaturan Toko</span>
+                        </>
+                      )}
                     </button>
                   </div>
 
