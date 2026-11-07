@@ -4,7 +4,8 @@ import {
   deleteDoc, 
   collection, 
   onSnapshot,
-  writeBatch
+  writeBatch,
+  getDocs
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { useSettingsStore, StoreSettings } from '../stores/settingsStore';
@@ -90,17 +91,14 @@ export function startFirebaseRealtimeSync(onStatusChange?: (status: {
     // 4. Listen ke Data Transaksi Penjualan (Orders)
     const ordersRef = collection(db, 'orders');
     unsubscribeOrders = onSnapshot(ordersRef, (snapshot) => {
-      if (!snapshot.empty) {
-        const cloudOrders: SalesOrder[] = [];
-        snapshot.forEach((docSnap) => {
-          cloudOrders.push(docSnap.data() as SalesOrder);
-        });
+      const cloudOrders: SalesOrder[] = [];
+      snapshot.forEach((docSnap) => {
+        cloudOrders.push(docSnap.data() as SalesOrder);
+      });
 
-        if (cloudOrders.length > 0) {
-          useSalesStore.setState({ orders: cloudOrders });
-          localStorage.setItem('plastipro_sales_orders_v1', JSON.stringify(cloudOrders));
-        }
-      }
+      // Sinkronkan ke local store (apapun jumlahnya, termasuk jika 0/kosong)
+      useSalesStore.setState({ orders: cloudOrders });
+      localStorage.setItem('plastipro_sales_orders_v1', JSON.stringify(cloudOrders));
     }, (error) => {
       console.warn('Firebase Orders snapshot error:', error);
     });
@@ -213,6 +211,27 @@ export async function saveOrderToFirebase(order: SalesOrder): Promise<boolean> {
     return true;
   } catch (error) {
     console.error('Gagal menyimpan order ke Firebase:', error);
+    return false;
+  }
+}
+
+/**
+ * Hapus seluruh data transaksi penjualan dari Firebase Firestore (Bersihkan Total)
+ */
+export async function clearAllOrdersFromFirebase(): Promise<boolean> {
+  try {
+    const ordersRef = collection(db, 'orders');
+    const snapshot = await getDocs(ordersRef);
+    if (!snapshot.empty) {
+      const batch = writeBatch(db);
+      snapshot.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+    }
+    return true;
+  } catch (error) {
+    console.warn('Gagal menghapus orders dari Firebase:', error);
     return false;
   }
 }

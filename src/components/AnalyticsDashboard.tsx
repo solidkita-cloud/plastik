@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { useSalesStore } from '../stores/salesStore';
 import { useSettingsStore } from '../stores/settingsStore';
+import { clearAllOrdersFromFirebase } from '../services/firebaseSync';
 import { SalesOrder } from '../types';
 
 type TimeFilter = 'today' | 'week' | 'month' | 'all';
@@ -41,7 +42,7 @@ export const AnalyticsDashboard: React.FC = () => {
   const [isResetDemoModalOpen, setIsResetDemoModalOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!deletePassword) {
       setDeleteError('Harap masukkan password / PIN pemilik!');
       return;
@@ -51,12 +52,23 @@ export const AnalyticsDashboard: React.FC = () => {
       setDeleteError('Password salah! Data riwayat penjualan tidak dihapus.');
       return;
     }
+
+    // 1. Bersihkan di local store & storage
     clearAllOrders();
+    try {
+      localStorage.setItem('plastipro_sales_orders_v1', '[]');
+    } catch (e) {
+      console.warn('Storage error:', e);
+    }
+
+    // 2. Bersihkan di Cloud Firebase Firestore
+    await clearAllOrdersFromFirebase();
+
     setIsClearModalOpen(false);
     setDeletePassword('');
     setDeleteError(null);
-    setActionNotice('Semua data riwayat transaksi berhasil dihapus! Pembukuan toko kini bersih (0 transaksi).');
-    setTimeout(() => setActionNotice(null), 5000);
+    setActionNotice('🧹 BERSIH TOTAL! Semua data transaksi penjualan berhasil dihapus (0 transaksi). Omzet & Laba Rp 0.');
+    setTimeout(() => setActionNotice(null), 6000);
   };
 
   // Filter orders by time range
@@ -759,10 +771,10 @@ export const AnalyticsDashboard: React.FC = () => {
               setDeleteError(null);
               setIsClearModalOpen(true);
             }}
-            className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl border-2 border-red-800 flex items-center gap-1.5 transition-all shadow-sm active:translate-x-0.5 active:translate-y-0.5"
+            className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl border-2 border-red-800 flex items-center gap-2 transition-all shadow-sm active:translate-x-0.5 active:translate-y-0.5"
           >
             <Trash2 className="w-4 h-4" />
-            <span>Hapus / Kosongkan Transaksi</span>
+            <span>🧹 Tombol Bersih (Kosongkan Data)</span>
           </button>
         </div>
       </div>
@@ -775,15 +787,15 @@ export const AnalyticsDashboard: React.FC = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="w-16 h-16 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto border-2 border-red-300">
-              <AlertTriangle className="w-9 h-9" />
+              <Trash2 className="w-9 h-9" />
             </div>
 
             <div className="text-center space-y-2">
               <h3 className="font-display font-black text-2xl text-ink tracking-tight text-red-600">
-                YAKIN NIH MAU DIHAPUS?
+                🧹 TOMBOL BERSIH: KOSONGKAN DATA?
               </h3>
               <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                Semua <strong>{orders.length} data riwayat transaksi penjualan</strong> akan <strong>dihapus permanen (menjadi 0 transaksi)</strong>.
+                Semua <strong>{orders.length} data riwayat transaksi penjualan</strong> akan <strong>dihapus bersih (menjadi 0 transaksi)</strong>.
               </p>
               <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-xs text-red-700 font-bold text-left">
                 ⚠️ Grafik, total omzet, dan rincian laba akan bersih kembali ke Rp 0 untuk siap mencatat transaksi riil dari pembeli toko Anda.
@@ -793,7 +805,7 @@ export const AnalyticsDashboard: React.FC = () => {
             {/* Input Password / PIN Pemilik untuk Menghapus */}
             <div className="space-y-2 text-left bg-slate-50 p-4 rounded-2xl border-2 border-slate-200">
               <label className="block text-xs font-black text-slate-800">
-                🔒 Masukkan Password / PIN Pemilik:
+                🔒 Masukkan Password / PIN Pemilik untuk Menghapus:
               </label>
               <input
                 type="password"
@@ -817,9 +829,18 @@ export const AnalyticsDashboard: React.FC = () => {
                   <span>{deleteError}</span>
                 </div>
               )}
-              <p className="text-[11px] text-slate-500 font-medium">
-                * Wajib otentikasi: Masukkan PIN pemilik toko ({isPinChanged ? 'PIN kustom toko Anda' : 'Default: 1234'}) untuk menghapus data secara permanen.
-              </p>
+              <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                <span>* PIN pemilik toko ({isPinChanged ? 'PIN kustom Anda' : 'Default: 1234'})</span>
+                {!isPinChanged && (
+                  <button
+                    type="button"
+                    onClick={() => setDeletePassword('1234')}
+                    className="text-primary hover:underline font-bold text-[11px]"
+                  >
+                    (Klik: Isi PIN 1234)
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-2">
@@ -841,7 +862,7 @@ export const AnalyticsDashboard: React.FC = () => {
                 className="py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs sm:text-sm neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-1.5"
               >
                 <Trash2 className="w-4 h-4" />
-                <span>Ya, Hapus Data!</span>
+                <span>Ya, Bersihkan Total!</span>
               </button>
             </div>
           </div>
