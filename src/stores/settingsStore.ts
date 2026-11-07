@@ -13,10 +13,13 @@ export interface StoreSettings {
   email: string;
   logoUrl: string | null;
   thermalFooterNote: string;
+  ownerPin?: string;
+  isPinChanged?: boolean;
 }
 
 interface SettingsState extends StoreSettings {
   updateSettings: (newSettings: Partial<StoreSettings>) => void;
+  updateOwnerPin: (newPin: string) => void;
   resetToDefault: () => void;
 }
 
@@ -34,7 +37,9 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   instagram: '@plastipro.id',
   email: 'halo@plastipro.co.id',
   logoUrl: null,
-  thermalFooterNote: 'Barang yang sudah dibeli dapat ditukar jika ada cacat pabrik maksimal 2 hari.'
+  thermalFooterNote: 'Barang yang sudah dibeli dapat ditukar jika ada cacat pabrik maksimal 2 hari.',
+  ownerPin: '1234',
+  isPinChanged: false
 };
 
 export function cleanPhoneNumber(raw?: string | null): { international: string; display: string } {
@@ -102,6 +107,18 @@ export const useSettingsStore = create<SettingsState>((set) => {
           phoneDisplay: updatedPhoneDisplay
         };
 
+        saveSettings(updated);
+        return updated;
+      });
+    },
+
+    updateOwnerPin: (newPin: string) => {
+      set((state) => {
+        const updated: StoreSettings = {
+          ...state,
+          ownerPin: newPin,
+          isPinChanged: true
+        };
         saveSettings(updated);
         return updated;
       });

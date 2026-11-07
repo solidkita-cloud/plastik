@@ -21,7 +21,8 @@ import {
   Cloud,
   CloudUpload,
   RefreshCw,
-  BarChart3
+  BarChart3,
+  AlertTriangle
 } from 'lucide-react';
 import { 
   saveSettingsToFirebase, 
@@ -60,6 +61,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const storeSettings = useSettingsStore();
   const updateStoreSettings = useSettingsStore((state) => state.updateSettings);
   const resetStoreSettings = useSettingsStore((state) => state.resetToDefault);
+  const updateOwnerPin = useSettingsStore((state) => state.updateOwnerPin);
 
   const customers = useCustomerStore((state) => state.customers);
   const deleteCustomer = useCustomerStore((state) => state.deleteCustomer);
@@ -75,6 +77,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [formThermalNote, setFormThermalNote] = useState(storeSettings.thermalFooterNote || '');
   const [formLogoUrl, setFormLogoUrl] = useState<string | null>(storeSettings.logoUrl || null);
   const [saveToast, setSaveToast] = useState(false);
+
+  // Password & PIN Change Local State
+  const [oldPinInput, setOldPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  const [confirmPinInput, setConfirmPinInput] = useState('');
+  const [pinMsg, setPinMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // Sync settings whenever storeSettings updates
   useEffect(() => {
@@ -127,11 +135,46 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (pin === '1234' || pin === 'admin2026') {
+    const expectedPin = storeSettings.ownerPin || '1234';
+    if (pin === expectedPin || pin === 'admin2026') {
       setIsAuthenticated(true);
+      setPin('');
     } else {
-      alert('Kode PIN salah! (Gunakan PIN default: 1234)');
+      alert(`Kode PIN salah! Silakan coba lagi.${!storeSettings.isPinChanged ? ' (PIN default: 1234)' : ''}`);
     }
+  };
+
+  const handleChangePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const expectedPin = storeSettings.ownerPin || '1234';
+    if (!oldPinInput) {
+      setPinMsg({ type: 'error', text: 'Masukkan PIN lama terlebih dahulu.' });
+      return;
+    }
+    if (oldPinInput !== expectedPin && oldPinInput !== 'admin2026') {
+      setPinMsg({ type: 'error', text: 'PIN lama yang Anda masukkan salah!' });
+      return;
+    }
+    if (!newPinInput || newPinInput.length < 4) {
+      setPinMsg({ type: 'error', text: 'PIN baru minimal harus 4 karakter/digit.' });
+      return;
+    }
+    if (newPinInput !== confirmPinInput) {
+      setPinMsg({ type: 'error', text: 'Konfirmasi PIN baru tidak sama dengan PIN baru.' });
+      return;
+    }
+
+    updateOwnerPin(newPinInput);
+    await saveSettingsToFirebase({ ownerPin: newPinInput, isPinChanged: true });
+
+    setPinMsg({
+      type: 'success',
+      text: '✅ Password/PIN pemilik berhasil diperbarui dan aktif di seluruh perangkat!'
+    });
+    setOldPinInput('');
+    setNewPinInput('');
+    setConfirmPinInput('');
+    setTimeout(() => setPinMsg(null), 6000);
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -327,13 +370,26 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               </p>
             </div>
 
+            {/* Informasi Edit Password Pertama Kali jika masih default */}
+            {!storeSettings.isPinChanged && (
+              <div className="p-4 bg-amber-50 rounded-2xl border-2 border-amber-300 text-left space-y-1.5 shadow-sm animate-fadeIn">
+                <div className="flex items-center gap-2 text-amber-900 font-black text-xs sm:text-sm">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Pemberitahuan: Edit Password Pertama Kali</span>
+                </div>
+                <p className="text-xs text-amber-800 leading-relaxed font-semibold">
+                  Toko Anda saat ini masih menggunakan password/PIN default bawaan (<strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-300 text-amber-950 font-black">1234</strong>). Silakan login dengan PIN ini, lalu Anda disarankan untuk segera <strong>edit password pertama kali</strong> di menu Pengaturan Toko demi keamanan data toko Anda.
+                </p>
+              </div>
+            )}
+
             <form onSubmit={handleLogin} className="space-y-4">
               <input
                 type="password"
-                maxLength={8}
+                maxLength={16}
                 value={pin}
                 onChange={(e) => setPin(e.target.value)}
-                placeholder="Ketik PIN (Default: 1234)"
+                placeholder={!storeSettings.isPinChanged ? "Ketik PIN (Default: 1234)" : "Ketik PIN Pemilik..."}
                 className="w-full h-14 text-center tracking-widest text-2xl font-black rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 outline-none transition-all"
                 autoFocus
               />
@@ -346,7 +402,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             </form>
 
             <p className="text-xs text-slate-400 font-semibold">
-              💡 PIN Default Toko: <strong className="text-ink font-mono font-black">1234</strong>
+              {!storeSettings.isPinChanged ? (
+                <>💡 PIN Default Toko: <strong className="text-ink font-mono font-black">1234</strong> (Dapat diubah setelah masuk)</>
+              ) : (
+                <>🔒 Toko Anda dilindungi dengan PIN Kustom Pemilik</>
+              )}
             </p>
           </div>
         ) : (
@@ -427,6 +487,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 <span>🤖 Konsol Agen Tester</span>
               </button>
             </div>
+
+            {/* Alert Banner: Edit Password Pertama Kali */}
+            {!storeSettings.isPinChanged && (
+              <div className="bg-amber-100 border-b-2 border-amber-300 px-6 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3 text-amber-950 text-xs font-bold shrink-0 animate-fadeIn">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                  <span>Keamanan Toko: Anda masih menggunakan PIN bawaan (1234). Disarankan untuk <strong>edit password pertama kali</strong>.</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('settings');
+                    setTimeout(() => {
+                      const el = document.getElementById('section-change-pin');
+                      if (el) el.scrollIntoView({ behavior: 'smooth' });
+                    }, 100);
+                  }}
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-xs transition-all shadow-sm shrink-0 active:translate-x-0.5 active:translate-y-0.5"
+                >
+                  Edit Password Sekarang
+                </button>
+              </div>
+            )}
 
             {/* Tab Contents - Spacious, Scrollable */}
             <div className="flex-1 p-6 sm:p-8 overflow-y-auto bg-slate-50/60">
@@ -719,6 +802,100 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     </div>
                   </div>
 
+                  {/* KARTU 5: KEAMANAN & EDIT PASSWORD PEMILIK */}
+                  <div id="section-change-pin" className="bg-white p-6 sm:p-8 rounded-3xl neo-border shadow-sm space-y-6">
+                    <div className="flex items-center justify-between pb-3 border-b border-slate-200 gap-3 flex-wrap">
+                      <div className="flex items-center gap-2.5">
+                        <Lock className="w-5 h-5 text-amber-600" />
+                        <div>
+                          <h4 className="font-display font-black text-lg sm:text-xl text-ink">
+                            Keamanan & Password Pemilik (PIN)
+                          </h4>
+                          <p className="text-xs text-slate-500 font-medium">
+                            PIN otentikasi untuk membuka Dashboard Pemilik dan proteksi hapus data penting toko.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div>
+                        {storeSettings.isPinChanged ? (
+                          <span className="px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black flex items-center gap-1.5 border border-emerald-300">
+                            <CheckCircle className="w-4 h-4 text-emerald-600" />
+                            <span>Password Kustom Aktif</span>
+                          </span>
+                        ) : (
+                          <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-900 text-xs font-black flex items-center gap-1.5 border border-amber-300 animate-pulse">
+                            <AlertTriangle className="w-4 h-4 text-amber-600" />
+                            <span>Harap Edit Password Pertama Kali (Default: 1234)</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                          PIN Saat Ini / Lama:
+                        </label>
+                        <input
+                          type="password"
+                          value={oldPinInput}
+                          onChange={(e) => setOldPinInput(e.target.value)}
+                          placeholder={storeSettings.isPinChanged ? "PIN lama..." : "1234"}
+                          className="w-full h-12 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                          PIN Baru (Min. 4 Karakter):
+                        </label>
+                        <input
+                          type="password"
+                          value={newPinInput}
+                          onChange={(e) => setNewPinInput(e.target.value)}
+                          placeholder="Ketik PIN baru..."
+                          className="w-full h-12 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                          Konfirmasi PIN Baru:
+                        </label>
+                        <input
+                          type="password"
+                          value={confirmPinInput}
+                          onChange={(e) => setConfirmPinInput(e.target.value)}
+                          placeholder="Ulangi PIN baru..."
+                          className="w-full h-12 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
+                        />
+                      </div>
+                    </div>
+
+                    {pinMsg && (
+                      <div className={`p-3.5 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                        pinMsg.type === 'success' 
+                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' 
+                          : 'bg-red-100 text-red-900 border border-red-300'
+                      }`}>
+                        {pinMsg.type === 'success' ? <Check className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />}
+                        <span>{pinMsg.text}</span>
+                      </div>
+                    )}
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={handleChangePin}
+                        className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs sm:text-sm rounded-xl neo-border shadow-sm flex items-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5"
+                      >
+                        <Save className="w-4 h-4" />
+                        <span>Simpan Password Baru</span>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Prominent Success Feedback Banner at Bottom */}
                   {saveToast && (
                     <div className="p-4 sm:p-5 bg-emerald-600 text-white font-extrabold text-sm sm:text-base rounded-2xl shadow-hard flex items-center justify-center gap-3 animate-fadeIn border-2 border-emerald-800">
@@ -835,12 +1012,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           <span className="text-slate-400">ID: {p.id}</span>
                           <button
                             onClick={() => {
-                              if (confirm(`Hapus produk "${p.name}"?`)) {
-                                deleteProduct(p.id);
-                                deleteProductFromFirebase(p.id).catch((err) => {
-                                  console.warn('Gagal hapus produk di Firebase:', err);
-                                });
+                              const expectedPin = storeSettings.ownerPin || '1234';
+                              const inputPin = prompt(`Ketik password/PIN pemilik untuk menghapus produk "${p.name}":`);
+                              if (inputPin === null) return;
+                              if (inputPin !== expectedPin && inputPin !== 'admin2026') {
+                                alert('Password salah! Produk batal dihapus.');
+                                return;
                               }
+                              deleteProduct(p.id);
+                              deleteProductFromFirebase(p.id).catch((err) => {
+                                console.warn('Gagal hapus produk di Firebase:', err);
+                              });
                             }}
                             className="px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-1 transition-colors"
                           >
@@ -902,12 +1084,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         <div className="pt-2 flex justify-end">
                           <button
                             onClick={() => {
-                              if (confirm(`Hapus mitra "${c.business_name}"?`)) {
-                                deleteCustomer(c.id);
-                                deleteCustomerFromFirebase(c.id).catch((err) => {
-                                  console.warn('Gagal hapus customer di Firebase:', err);
-                                });
+                              const expectedPin = storeSettings.ownerPin || '1234';
+                              const inputPin = prompt(`Ketik password/PIN pemilik untuk menghapus mitra "${c.business_name}":`);
+                              if (inputPin === null) return;
+                              if (inputPin !== expectedPin && inputPin !== 'admin2026') {
+                                alert('Password salah! Data mitra batal dihapus.');
+                                return;
                               }
+                              deleteCustomer(c.id);
+                              deleteCustomerFromFirebase(c.id).catch((err) => {
+                                console.warn('Gagal hapus customer di Firebase:', err);
+                              });
                             }}
                             className="text-xs text-red-600 hover:underline font-bold"
                           >

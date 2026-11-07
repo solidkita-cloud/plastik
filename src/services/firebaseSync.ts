@@ -245,7 +245,9 @@ export async function uploadAllLocalDataToFirebase(): Promise<{
       instagram: currentSettings.instagram,
       email: currentSettings.email,
       logoUrl: currentSettings.logoUrl,
-      thermalFooterNote: currentSettings.thermalFooterNote
+      thermalFooterNote: currentSettings.thermalFooterNote,
+      ownerPin: currentSettings.ownerPin || '1234',
+      isPinChanged: Boolean(currentSettings.isPinChanged)
     };
     await setDoc(settingsRef, JSON.parse(JSON.stringify(settingsPayload)), { merge: true });
 

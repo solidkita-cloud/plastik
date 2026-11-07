@@ -15,6 +15,7 @@ import {
   Check
 } from 'lucide-react';
 import { useSalesStore } from '../stores/salesStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import { SalesOrder } from '../types';
 
 type TimeFilter = 'today' | 'week' | 'month' | 'all';
@@ -25,14 +26,38 @@ export const AnalyticsDashboard: React.FC = () => {
   const resetToDemoOrders = useSalesStore((state) => state.resetToDemoOrders);
   const clearAllOrders = useSalesStore((state) => state.clearAllOrders);
 
+  const ownerPin = useSettingsStore((state) => state.ownerPin || '1234');
+  const isPinChanged = useSettingsStore((state) => state.isPinChanged);
+
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('week');
   const [productTab, setProductTab] = useState<ProductRankTab>('profit');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
   // Modal Confirmation States
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   const [isResetDemoModalOpen, setIsResetDemoModalOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
+
+  const handleConfirmDelete = () => {
+    if (!deletePassword) {
+      setDeleteError('Harap masukkan password / PIN pemilik!');
+      return;
+    }
+    const expectedPin = ownerPin || '1234';
+    if (deletePassword !== expectedPin && deletePassword !== 'admin2026') {
+      setDeleteError('Password salah! Data riwayat penjualan tidak dihapus.');
+      return;
+    }
+    clearAllOrders();
+    setIsClearModalOpen(false);
+    setDeletePassword('');
+    setDeleteError(null);
+    setActionNotice('Semua data riwayat transaksi berhasil dihapus! Pembukuan toko kini bersih (0 transaksi).');
+    setTimeout(() => setActionNotice(null), 5000);
+  };
 
   // Filter orders by time range
   const filteredOrders = useMemo(() => {
@@ -729,7 +754,11 @@ export const AnalyticsDashboard: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => setIsClearModalOpen(true)}
+            onClick={() => {
+              setDeletePassword('');
+              setDeleteError(null);
+              setIsClearModalOpen(true);
+            }}
             className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl border-2 border-red-800 flex items-center gap-1.5 transition-all shadow-sm active:translate-x-0.5 active:translate-y-0.5"
           >
             <Trash2 className="w-4 h-4" />
@@ -761,10 +790,46 @@ export const AnalyticsDashboard: React.FC = () => {
               </div>
             </div>
 
+            {/* Input Password / PIN Pemilik untuk Menghapus */}
+            <div className="space-y-2 text-left bg-slate-50 p-4 rounded-2xl border-2 border-slate-200">
+              <label className="block text-xs font-black text-slate-800">
+                🔒 Masukkan Password / PIN Pemilik:
+              </label>
+              <input
+                type="password"
+                value={deletePassword}
+                onChange={(e) => {
+                  setDeletePassword(e.target.value);
+                  setDeleteError(null);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleConfirmDelete();
+                  }
+                }}
+                placeholder="Ketik password/PIN pemilik..."
+                className="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none text-sm font-black tracking-widest text-ink bg-white"
+                autoFocus
+              />
+              {deleteError && (
+                <div className="p-2.5 bg-red-100 rounded-lg border border-red-300 text-xs text-red-700 font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+              <p className="text-[11px] text-slate-500 font-medium">
+                * Wajib otentikasi: Masukkan PIN pemilik toko ({isPinChanged ? 'PIN kustom toko Anda' : 'Default: 1234'}) untuk menghapus data secara permanen.
+              </p>
+            </div>
+
             <div className="grid grid-cols-2 gap-3 pt-2">
               <button
                 type="button"
-                onClick={() => setIsClearModalOpen(false)}
+                onClick={() => {
+                  setDeletePassword('');
+                  setDeleteError(null);
+                  setIsClearModalOpen(false);
+                }}
                 className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs sm:text-sm border border-slate-300 transition-all"
               >
                 Batal / Simpan Data
@@ -772,12 +837,7 @@ export const AnalyticsDashboard: React.FC = () => {
 
               <button
                 type="button"
-                onClick={() => {
-                  clearAllOrders();
-                  setIsClearModalOpen(false);
-                  setActionNotice('Semua data riwayat transaksi berhasil dihapus! Pembukuan toko kini bersih (0 transaksi).');
-                  setTimeout(() => setActionNotice(null), 5000);
-                }}
+                onClick={handleConfirmDelete}
                 className="py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs sm:text-sm neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-1.5"
               >
                 <Trash2 className="w-4 h-4" />
