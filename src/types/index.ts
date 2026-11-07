@@ -37,6 +37,8 @@ export interface ProductVariant {
   thickness_micron?: number;
   color?: string;
   stock_status: StockStatus;
+  stock_qty?: number; // Sisa stok fisik (dalam pcs / unit dasar)
+  min_stock_alert?: number; // Ambang batas stok menipis
   base_pcs_weight_grams: number;
   units: VariantUnit[];
 }
@@ -106,6 +108,14 @@ export interface OrderItemRecord {
   profit: number; // (sell_price - cogs_price) * qty
 }
 
+export interface SalesOrderPayment {
+  id: string;
+  created_at: string;
+  amount: number;
+  method: 'cash' | 'transfer';
+  notes?: string;
+}
+
 export interface SalesOrder {
   id: string;
   order_number: string;
@@ -122,5 +132,41 @@ export interface SalesOrder {
   profit_margin_pct: number;
   status: 'completed' | 'pending' | 'cancelled';
   source: 'whatsapp_checkout' | 'pos_thermal' | 'qr_reorder';
+  // Payment & Tempo Details
+  payment_method?: 'cash' | 'transfer' | 'tempo';
+  payment_status?: 'paid' | 'unpaid' | 'partial';
+  due_date?: string; // Tanggal jatuh tempo
+  amount_paid?: number; // Total nominal yang sudah dibayar
+  remaining_balance?: number; // Sisa tagihan piutang
+  payment_history?: SalesOrderPayment[];
+}
+
+// Manajemen Stok & Mutasi
+export interface StockMovement {
+  id: string;
+  created_at: string;
+  product_id: string;
+  product_name: string;
+  variant_id: string;
+  variant_name: string;
+  type: 'in_restock' | 'out_sale' | 'adjustment';
+  qty_change: number; // e.g. +1000 atau -50 pcs
+  unit_name?: string;
+  resulting_stock: number;
+  notes: string;
+  order_number?: string;
+}
+
+// Buku Kas & Pengeluaran Operasional
+export type ExpenseCategory = 'operasional' | 'transport' | 'gaji' | 'utilitas' | 'pembelian_stok' | 'lainnya';
+
+export interface ExpenseRecord {
+  id: string;
+  created_at: string; // ISO 8601 string
+  category: ExpenseCategory;
+  category_name: string;
+  title: string;
+  amount: number;
+  notes?: string;
 }
 

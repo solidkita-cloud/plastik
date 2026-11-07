@@ -12,11 +12,15 @@ import {
   UserCheck,
   Scale,
   FileDown,
-  Printer
+  Printer,
+  Banknote,
+  CreditCard,
+  CalendarClock
 } from 'lucide-react';
 import { useCartStore } from '../stores/cartStore';
 import { useSettingsStore } from '../stores/settingsStore';
 import { useSalesStore } from '../stores/salesStore';
+import { useCatalogStore } from '../stores/catalogStore';
 import { saveOrderToFirebase } from '../services/firebaseSync';
 import { sanitizeNote, generateVerificationChecksum } from '../lib/security';
 import { generateInvoicePDF } from '../lib/pdfGenerator';
@@ -51,6 +55,10 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
   const [guestPhone, setGuestPhone] = useState('');
   const [guestAddress, setGuestAddress] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Payment Method & Tempo States (Web Manajemen Usaha)
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'transfer' | 'tempo'>('cash');
+  const [tempoDays, setTempoDays] = useState<number>(7);
 
   // Thermal 58mm Receipt Modal State
   const [isThermalOpen, setIsThermalOpen] = useState(false);
@@ -102,6 +110,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
         kargo: 'Ekspedisi Kargo (Dakota / Baraka / Bal-balan)'
       };
 
+      const isTempo = paymentMethod === 'tempo';
+      const paymentLabels: Record<string, string> = {
+        cash: 'Tunai / Cash (Lunas)',
+        transfer: 'Transfer Bank (Lunas)',
+        tempo: `Tempo ${tempoDays} Hari (Belum Lunas)`
+      };
+
       // 3. Format WhatsApp Text (Clean, Professional, Indented)
       let text = `Halo Admin *${storeSettings.storeName}*!\n`;
       text += `Saya ingin melakukan pemesanan plastik & kemasan:\n\n`;
@@ -113,7 +128,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       } else {
         text += `📍 *LOKASI PICKUP:* ${storeSettings.address}\n`;
       }
-      text += `🚚 *METODE:* ${deliveryLabels[deliveryMethod]}\n`;
+      text += `🚚 *PENGIRIMAN:* ${deliveryLabels[deliveryMethod]}\n`;
+      text += `💳 *METODE BAYAR:* ${paymentLabels[paymentMethod]}\n`;
+      if (isTempo) {
+        const dueDateObj = new Date(Date.now() + tempoDays * 24 * 60 * 60 * 1000);
+        text += `⏳ *JATUH TEMPO:* ${dueDateObj.toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}\n`;
+      }
       text += `⚖️ *ESTIMASI BERAT:* ${totalWeightKg} Kg\n\n`;
 
       text += `📋 *RINCIAN DAFTAR BARANG:*\n`;
@@ -132,9 +152,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       }
 
       text += `\n🔒 *KODE INTEGRITAS:* [VERIF: ${code}]\n`;
-      text += `_Mohon info ketersediaan stok & nomor rekening pembayaran. Terima kasih!_`;
+      text += `_Mohon info ketersediaan stok & konfirmasi pesanan. Terima kasih!_`;
 
-      // Record Sales Order to Analytics & Cloud
+      // 1. Potong Stok Real-Time
+      useCatalogStore.getState().deductStock(items, orderNumber);
+
+      // 2. Record Sales Order to Analytics & Cloud
+      const dueDateIso = isTempo ? new Date(Date.now() + tempoDays * 24 * 60 * 60 * 1000).toISOString() : undefined;
       try {
         const recordedOrder = recordCheckoutOrder({
           items,
@@ -142,7 +166,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
           customerPhone,
           customerId: customer?.id,
           deliveryMethod: deliveryLabels[deliveryMethod] || 'Kurir Toko',
-          source: customer?.qr_token ? 'qr_reorder' : 'whatsapp_checkout'
+          source: customer?.qr_token ? 'qr_reorder' : 'whatsapp_checkout',
+          paymentMethod,
+          dueDate: dueDateIso
         });
         saveOrderToFirebase(recordedOrder).catch((e) => console.warn('Sync order to Firebase error:', e));
       } catch (recErr) {
@@ -188,7 +214,13 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       verificationCode: code
     });
 
-    // Record POS Thermal receipt order
+    const isTempo = paymentMethod === 'tempo';
+    const dueDateIso = isTempo ? new Date(Date.now() + tempoDays * 24 * 60 * 60 * 1000).toISOString() : undefined;
+
+    // 1. Potong Stok Real-Time
+    useCatalogStore.getState().deductStock(items, orderNumber);
+
+    // 2. Record POS Thermal receipt order
     try {
       const recordedOrder = recordCheckoutOrder({
         items,
@@ -196,7 +228,9 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
         customerPhone: customer?.phone_number || guestPhone || '-',
         customerId: customer?.id,
         deliveryMethod: deliveryLabels[deliveryMethod] || 'Ambil di Toko Fisik',
-        source: 'pos_thermal'
+        source: 'pos_thermal',
+        paymentMethod,
+        dueDate: dueDateIso
       });
       saveOrderToFirebase(recordedOrder).catch((e) => console.warn('Sync thermal order error:', e));
     } catch (recErr) {
@@ -445,6 +479,90 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
                     <span>Kargo Bal</span>
                   </button>
                 </div>
+              </div>
+            )}
+
+            {/* Payment Method & Tempo Selection */}
+            {items.length > 0 && (
+              <div className="space-y-2 pt-2 border-t border-slate-200">
+                <label className="block text-xs font-black uppercase tracking-wider text-slate-700">
+                  Metode Pembayaran:
+                </label>
+                <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('cash')}
+                    className={`p-2 rounded-xl border-2 font-extrabold flex flex-col items-center gap-1 transition-all ${
+                      paymentMethod === 'cash'
+                        ? 'border-emerald-600 bg-emerald-50 text-emerald-800 shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  >
+                    <Banknote className="w-4 h-4 text-emerald-600" />
+                    <span>Tunai (Lunas)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('transfer')}
+                    className={`p-2 rounded-xl border-2 font-extrabold flex flex-col items-center gap-1 transition-all ${
+                      paymentMethod === 'transfer'
+                        ? 'border-primary bg-primary-light text-primary-dark shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  >
+                    <CreditCard className="w-4 h-4 text-primary" />
+                    <span>Transfer</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod('tempo')}
+                    className={`p-2 rounded-xl border-2 font-extrabold flex flex-col items-center gap-1 transition-all ${
+                      paymentMethod === 'tempo'
+                        ? 'border-amber-500 bg-amber-50 text-amber-900 shadow-sm'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  >
+                    <CalendarClock className="w-4 h-4 text-amber-600" />
+                    <span>Tempo (Piutang)</span>
+                  </button>
+                </div>
+
+                {/* Opsi Jatuh Tempo jika Tempo dipilih */}
+                {paymentMethod === 'tempo' && (
+                  <div className="p-3 bg-amber-50/90 rounded-2xl border border-amber-300 space-y-2 animate-fadeIn text-left">
+                    <div className="flex items-center justify-between text-xs font-black text-amber-950">
+                      <span>Jatuh Tempo:</span>
+                      <span className="font-mono text-amber-800 bg-white px-2 py-0.5 rounded border border-amber-200">
+                        {new Date(Date.now() + tempoDays * 24 * 60 * 60 * 1000).toLocaleDateString('id-ID', {
+                          day: 'numeric',
+                          month: 'short',
+                          year: 'numeric'
+                        })}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-1.5 text-xs">
+                      {[7, 14, 30].map((days) => (
+                        <button
+                          key={days}
+                          type="button"
+                          onClick={() => setTempoDays(days)}
+                          className={`py-1 px-2 rounded-lg font-black border transition-all text-xs ${
+                            tempoDays === days
+                              ? 'bg-amber-500 text-white border-amber-600 shadow-sm'
+                              : 'bg-white text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          {days} Hari
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[11px] text-amber-900 font-medium leading-tight">
+                      * Dicatat ke <strong>Buku Piutang Mitra</strong> sebagai tagihan belum lunas.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 

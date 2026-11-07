@@ -11,7 +11,10 @@ interface SalesState {
     customerId?: string;
     deliveryMethod: string;
     source: 'whatsapp_checkout' | 'pos_thermal' | 'qr_reorder';
+    paymentMethod?: 'cash' | 'transfer' | 'tempo';
+    dueDate?: string;
   }) => SalesOrder;
+  recordPayment: (orderId: string, amount: number, method: 'cash' | 'transfer', notes?: string) => SalesOrder | null;
   deleteOrder: (id: string) => void;
   clearAllOrders: () => void;
   resetToDemoOrders: () => void;
@@ -71,7 +74,12 @@ function generateInitialDemoOrders(): SalesOrder[] {
       total_profit: 288000,
       profit_margin_pct: 27.0,
       status: 'completed',
-      source: 'qr_reorder'
+      source: 'qr_reorder',
+      payment_method: 'tempo',
+      payment_status: 'unpaid',
+      due_date: new Date(now + 3 * dayMs).toISOString(),
+      amount_paid: 0,
+      remaining_balance: 1068000
     },
 
     // 2. Hari Ini (4 jam lalu) - Kopi Janji Manis
@@ -167,7 +175,21 @@ function generateInitialDemoOrders(): SalesOrder[] {
       total_profit: 420000,
       profit_margin_pct: 27.5,
       status: 'completed',
-      source: 'pos_thermal'
+      source: 'pos_thermal',
+      payment_method: 'tempo',
+      payment_status: 'partial',
+      due_date: new Date(now - 1 * dayMs).toISOString(),
+      amount_paid: 500000,
+      remaining_balance: 1025000,
+      payment_history: [
+        {
+          id: 'pay_demo_1',
+          created_at: new Date(now - 1 * dayMs).toISOString(),
+          amount: 500000,
+          method: 'transfer',
+          notes: 'Transfer DP 50% via BCA'
+        }
+      ]
     },
 
     // 4. 2 Hari Lalu - Resto Sambal Bakar Juanda
@@ -517,7 +539,16 @@ export const useSalesStore = create<SalesState>((set, get) => {
       });
     },
 
-    recordCheckoutOrder: ({ items, customerName, customerPhone, customerId, deliveryMethod, source }) => {
+    recordCheckoutOrder: ({ 
+      items, 
+      customerName, 
+      customerPhone, 
+      customerId, 
+      deliveryMethod, 
+      source,
+      paymentMethod = 'cash',
+      dueDate
+    }) => {
       const orderItems: OrderItemRecord[] = items.map((item) => {
         const cogs = item.cogs_price ?? Math.round(item.price * 0.72);
         const subtotal = item.price * item.qty;
@@ -544,6 +575,9 @@ export const useSalesStore = create<SalesState>((set, get) => {
       const profitMarginPct = totalOmzet > 0 ? Number(((totalProfit / totalOmzet) * 100).toFixed(1)) : 0;
       const totalQty = orderItems.reduce((acc, it) => acc + it.qty, 0);
 
+      const isTempo = paymentMethod === 'tempo';
+      const defaultDueDate = dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+
       const newOrder: SalesOrder = {
         id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         order_number: `TP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -559,11 +593,59 @@ export const useSalesStore = create<SalesState>((set, get) => {
         total_profit: totalProfit,
         profit_margin_pct: profitMarginPct,
         status: 'completed',
-        source
+        source,
+        payment_method: paymentMethod,
+        payment_status: isTempo ? 'unpaid' : 'paid',
+        due_date: isTempo ? defaultDueDate : undefined,
+        amount_paid: isTempo ? 0 : totalOmzet,
+        remaining_balance: isTempo ? totalOmzet : 0,
+        payment_history: !isTempo ? [
+          {
+            id: `pay_${Date.now()}`,
+            created_at: new Date().toISOString(),
+            amount: totalOmzet,
+            method: paymentMethod,
+            notes: 'Lunas saat transaksi dibuat'
+          }
+        ] : []
       };
 
       get().addOrder(newOrder);
       return newOrder;
+    },
+
+    recordPayment: (orderId, amount, method, notes) => {
+      let updatedOrder: SalesOrder | null = null;
+      set((state) => {
+        const updated = state.orders.map((o) => {
+          if (o.id !== orderId) return o;
+          const currentPaid = o.amount_paid || 0;
+          const newPaid = currentPaid + amount;
+          const remaining = Math.max(0, o.total_omzet - newPaid);
+          const newStatus = remaining <= 0 ? ('paid' as const) : ('partial' as const);
+
+          const newPayment = {
+            id: `pay_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+            created_at: new Date().toISOString(),
+            amount,
+            method,
+            notes: notes || 'Pembayaran angsuran / pelunasan piutang'
+          };
+
+          updatedOrder = {
+            ...o,
+            amount_paid: newPaid,
+            remaining_balance: remaining,
+            payment_status: newStatus,
+            payment_history: [...(o.payment_history || []), newPayment]
+          };
+          return updatedOrder;
+        });
+
+        saveOrders(updated);
+        return { orders: updated };
+      });
+      return updatedOrder;
     },
 
     deleteOrder: (id) => {

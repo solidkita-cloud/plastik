@@ -1,40 +1,81 @@
 import React, { useState, useMemo } from 'react';
 import { 
   TrendingUp, 
-  DollarSign, 
-  ShoppingBag, 
-  Users, 
   Download, 
-  BarChart3,
-  Flame,
-  Gem,
-  AlertTriangle,
-  Trash2,
-  RotateCcw,
-  X,
-  Check
+  BarChart3, 
+  AlertTriangle, 
+  Trash2, 
+  RotateCcw, 
+  X, 
+  CreditCard, 
+  Receipt, 
+  Plus, 
+  ArrowUpRight, 
+  Clock, 
+  AlertCircle, 
+  CheckCircle2, 
+  MessageSquare, 
+  Search, 
+  Package, 
+  Banknote 
 } from 'lucide-react';
 import { useSalesStore } from '../stores/salesStore';
+import { useCatalogStore } from '../stores/catalogStore';
+import { useExpenseStore, EXPENSE_CATEGORIES } from '../stores/expenseStore';
 import { useSettingsStore } from '../stores/settingsStore';
-import { clearAllOrdersFromFirebase } from '../services/firebaseSync';
+import { 
+  clearAllOrdersFromFirebase, 
+  deleteExpenseFromFirebase 
+} from '../services/firebaseSync';
 import { SalesOrder } from '../types';
+import { PaymentTempoModal } from './PaymentTempoModal';
+import { AddExpenseModal } from './AddExpenseModal';
+import { RestockModal } from './RestockModal';
 
 type TimeFilter = 'today' | 'week' | 'month' | 'all';
 type ProductRankTab = 'profit' | 'volume' | 'omzet';
+type AnalyticsSubTab = 'sales' | 'expenses' | 'receivables' | 'inventory';
 
 export const AnalyticsDashboard: React.FC = () => {
+  // Navigation Sub Tab
+  const [activeSubTab, setActiveSubTab] = useState<AnalyticsSubTab>('sales');
+
+  // Stores
   const orders = useSalesStore((state) => state.orders);
   const resetToDemoOrders = useSalesStore((state) => state.resetToDemoOrders);
   const clearAllOrders = useSalesStore((state) => state.clearAllOrders);
 
-  const ownerPin = useSettingsStore((state) => state.ownerPin || '1234');
-  const isPinChanged = useSettingsStore((state) => state.isPinChanged);
+  const products = useCatalogStore((state) => state.products);
+  const stockMovements = useCatalogStore((state) => state.stockMovements);
 
+  const expenses = useExpenseStore((state) => state.expenses);
+  const deleteExpense = useExpenseStore((state) => state.deleteExpense);
+
+  const storeSettings = useSettingsStore();
+  const ownerPin = useSettingsStore((state) => state.ownerPin || '1234');
+
+  // Filter States
   const [timeFilter, setTimeFilter] = useState<TimeFilter>('week');
   const [productTab, setProductTab] = useState<ProductRankTab>('profit');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
-  // Modal Confirmation States
+  // Modals
+  const [isPaymentTempoOpen, setIsPaymentTempoOpen] = useState(false);
+  const [selectedTempoOrder, setSelectedTempoOrder] = useState<SalesOrder | null>(null);
+
+  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false);
+
+  const [isRestockOpen, setIsRestockOpen] = useState(false);
+  const [restockProductVariant, setRestockProductVariant] = useState<{ productId?: string; variantId?: string }>({});
+
+  // Receivables Filters
+  const [receivableFilter, setReceivableFilter] = useState<'all' | 'unpaid' | 'overdue' | 'paid'>('all');
+
+  // Inventory Filters & Search
+  const [stockSearch, setStockSearch] = useState('');
+  const [stockStatusFilter, setStockStatusFilter] = useState<'all' | 'warning' | 'empty'>('all');
+
+  // Modal Confirmation States for Delete
   const [isClearModalOpen, setIsClearModalOpen] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -42,36 +83,9 @@ export const AnalyticsDashboard: React.FC = () => {
   const [isResetDemoModalOpen, setIsResetDemoModalOpen] = useState(false);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
 
-  const handleConfirmDelete = async () => {
-    if (!deletePassword) {
-      setDeleteError('Harap masukkan password / PIN pemilik!');
-      return;
-    }
-    const expectedPin = ownerPin || '1234';
-    if (deletePassword !== expectedPin && deletePassword !== 'admin2026') {
-      setDeleteError('Password salah! Data riwayat penjualan tidak dihapus.');
-      return;
-    }
-
-    // 1. Bersihkan di local store & storage
-    clearAllOrders();
-    try {
-      localStorage.setItem('plastipro_sales_orders_v1', '[]');
-    } catch (e) {
-      console.warn('Storage error:', e);
-    }
-
-    // 2. Bersihkan di Cloud Firebase Firestore
-    await clearAllOrdersFromFirebase();
-
-    setIsClearModalOpen(false);
-    setDeletePassword('');
-    setDeleteError(null);
-    setActionNotice('🧹 BERSIH TOTAL! Semua data transaksi penjualan berhasil dihapus (0 transaksi). Omzet & Laba Rp 0.');
-    setTimeout(() => setActionNotice(null), 6000);
-  };
-
-  // Filter orders by time range
+  // ----------------------------------------------------
+  // FILTER ORDERS BY TIME
+  // ----------------------------------------------------
   const filteredOrders = useMemo(() => {
     const now = Date.now();
     const dayMs = 24 * 60 * 60 * 1000;
@@ -80,44 +94,200 @@ export const AnalyticsDashboard: React.FC = () => {
       const ordTime = new Date(ord.created_at).getTime();
       const diffMs = now - ordTime;
 
-      if (timeFilter === 'today') {
-        // Same calendar day or < 24 hours
-        return diffMs <= dayMs;
-      }
-      if (timeFilter === 'week') {
-        return diffMs <= 7 * dayMs;
-      }
-      if (timeFilter === 'month') {
-        return diffMs <= 30 * dayMs;
-      }
+      if (timeFilter === 'today') return diffMs <= dayMs;
+      if (timeFilter === 'week') return diffMs <= 7 * dayMs;
+      if (timeFilter === 'month') return diffMs <= 30 * dayMs;
       return true; // 'all'
     });
   }, [orders, timeFilter]);
 
-  // Aggregate Top-Level KPIs
+  // ----------------------------------------------------
+  // FILTER EXPENSES BY TIME
+  // ----------------------------------------------------
+  const filteredExpenses = useMemo(() => {
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    return expenses.filter((exp) => {
+      const expTime = new Date(exp.created_at).getTime();
+      const diffMs = now - expTime;
+
+      if (timeFilter === 'today') return diffMs <= dayMs;
+      if (timeFilter === 'week') return diffMs <= 7 * dayMs;
+      if (timeFilter === 'month') return diffMs <= 30 * dayMs;
+      return true;
+    });
+  }, [expenses, timeFilter]);
+
+  // ----------------------------------------------------
+  // AGGREGATE FINANCIAL KPIS (OMZET, LABA KOTOR, BEBAN, LABA BERSIH)
+  // ----------------------------------------------------
   const kpis = useMemo(() => {
     const totalOmzet = filteredOrders.reduce((sum, o) => sum + o.total_omzet, 0);
-    const totalProfit = filteredOrders.reduce((sum, o) => sum + o.total_profit, 0);
+    const totalGrossProfit = filteredOrders.reduce((sum, o) => sum + o.total_profit, 0);
     const totalQty = filteredOrders.reduce((sum, o) => sum + o.total_qty, 0);
     const totalOrders = filteredOrders.length;
-    const profitMargin = totalOmzet > 0 ? ((totalProfit / totalOmzet) * 100).toFixed(1) : '0';
+    const profitMargin = totalOmzet > 0 ? ((totalGrossProfit / totalOmzet) * 100).toFixed(1) : '0';
     const aov = totalOrders > 0 ? Math.round(totalOmzet / totalOrders) : 0;
-
-    // Unique customers
     const uniqueCustomers = new Set(filteredOrders.map((o) => o.customer_name)).size;
+
+    // Total Operasional Beban
+    const totalExpenses = filteredExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+    // Laba Bersih Akhir Usaha = Laba Kotor - Beban Operasional
+    const netProfit = totalGrossProfit - totalExpenses;
+    const netMarginPct = totalOmzet > 0 ? ((netProfit / totalOmzet) * 100).toFixed(1) : '0';
+
+    // Kas Masuk Riil (Uang tunai & transfer yang sudah diterima)
+    const cashInflow = filteredOrders.reduce((sum, o) => {
+      if (o.payment_method === 'tempo') {
+        return sum + (o.amount_paid || 0);
+      }
+      return sum + o.total_omzet;
+    }, 0);
 
     return {
       totalOmzet,
-      totalProfit,
+      totalGrossProfit,
+      totalExpenses,
+      netProfit,
+      netMarginPct,
+      cashInflow,
       totalQty,
       totalOrders,
       profitMargin,
       aov,
       uniqueCustomers
     };
-  }, [filteredOrders]);
+  }, [filteredOrders, filteredExpenses]);
 
-  // Group by Product for Leaderboard
+  // ----------------------------------------------------
+  // RECEIVABLES (PIUTANG TEMPO) CALCULATIONS
+  // ----------------------------------------------------
+  const tempoOrders = useMemo(() => {
+    return orders.filter((o) => o.payment_method === 'tempo');
+  }, [orders]);
+
+  const receivablesSummary = useMemo(() => {
+    const now = Date.now();
+    let totalReceivables = 0;
+    let totalPaid = 0;
+    let overdueCount = 0;
+    let unpaidCount = 0;
+
+    tempoOrders.forEach((o) => {
+      const remaining = o.remaining_balance ?? (o.total_omzet - (o.amount_paid || 0));
+      totalReceivables += remaining;
+      totalPaid += (o.amount_paid || 0);
+
+      if (remaining > 0) {
+        unpaidCount += 1;
+        if (o.due_date && new Date(o.due_date).getTime() < now) {
+          overdueCount += 1;
+        }
+      }
+    });
+
+    return {
+      totalReceivables,
+      totalPaid,
+      overdueCount,
+      unpaidCount,
+      totalTempoOrders: tempoOrders.length
+    };
+  }, [tempoOrders]);
+
+  const filteredTempoOrders = useMemo(() => {
+    const now = Date.now();
+    return tempoOrders.filter((o) => {
+      const remaining = o.remaining_balance ?? (o.total_omzet - (o.amount_paid || 0));
+      const isOverdue = Boolean(o.due_date && new Date(o.due_date).getTime() < now && remaining > 0);
+
+      if (receivableFilter === 'unpaid') return remaining > 0;
+      if (receivableFilter === 'overdue') return isOverdue;
+      if (receivableFilter === 'paid') return remaining <= 0;
+      return true; // 'all'
+    });
+  }, [tempoOrders, receivableFilter]);
+
+  // ----------------------------------------------------
+  // PHYSICAL STOCK STATUS CALCULATIONS
+  // ----------------------------------------------------
+  const stockSummary = useMemo(() => {
+    const allVariants: {
+      productId: string;
+      productName: string;
+      productCategory: string;
+      productImage: string;
+      variantId: string;
+      variantName: string;
+      stockQty: number;
+      minAlert: number;
+      status: 'safe' | 'low' | 'empty';
+    }[] = [];
+
+    let safeCount = 0;
+    let lowCount = 0;
+    let emptyCount = 0;
+
+    products.forEach((p) => {
+      p.variants?.forEach((v) => {
+        const qty = v.stock_qty ?? 0;
+        const minAlert = v.min_stock_alert ?? 200;
+        let status: 'safe' | 'low' | 'empty' = 'safe';
+
+        if (qty <= 0) {
+          status = 'empty';
+          emptyCount += 1;
+        } else if (qty <= minAlert) {
+          status = 'low';
+          lowCount += 1;
+        } else {
+          safeCount += 1;
+        }
+
+        allVariants.push({
+          productId: p.id,
+          productName: p.name,
+          productCategory: p.material || 'PP',
+          productImage: p.image_url,
+          variantId: v.id,
+          variantName: v.name,
+          stockQty: qty,
+          minAlert,
+          status
+        });
+      });
+    });
+
+    return {
+      allVariants,
+      totalVariants: allVariants.length,
+      safeCount,
+      lowCount,
+      emptyCount
+    };
+  }, [products]);
+
+  const filteredStockList = useMemo(() => {
+    return stockSummary.allVariants.filter((item) => {
+      // Search
+      const matchSearch = stockSearch === '' || 
+        item.productName.toLowerCase().includes(stockSearch.toLowerCase()) ||
+        item.variantName.toLowerCase().includes(stockSearch.toLowerCase());
+
+      if (!matchSearch) return false;
+
+      // Status Filter
+      if (stockStatusFilter === 'warning') return item.status === 'low' || item.status === 'empty';
+      if (stockStatusFilter === 'empty') return item.status === 'empty';
+      return true;
+    });
+  }, [stockSummary.allVariants, stockSearch, stockStatusFilter]);
+
+  // ----------------------------------------------------
+  // PRODUCT LEADERBOARD CALCULATIONS
+  // ----------------------------------------------------
   const productPerformance = useMemo(() => {
     const map: Record<string, {
       id: string;
@@ -169,7 +339,9 @@ export const AnalyticsDashboard: React.FC = () => {
     }
   }, [filteredOrders, productTab]);
 
-  // Group by Customer for Customer Intelligence
+  // ----------------------------------------------------
+  // CUSTOMER INTELLIGENCE CALCULATIONS
+  // ----------------------------------------------------
   const customerPerformance = useMemo(() => {
     const map: Record<string, {
       name: string;
@@ -210,7 +382,6 @@ export const AnalyticsDashboard: React.FC = () => {
     });
 
     return Object.values(map).map((c) => {
-      // Find top item
       const topItemEntry = Object.entries(c.favoriteItems).sort((a, b) => b[1] - a[1])[0];
       return {
         ...c,
@@ -221,12 +392,11 @@ export const AnalyticsDashboard: React.FC = () => {
     }).sort((a, b) => b.totalSpend - a.totalSpend);
   }, [filteredOrders]);
 
-  // Daily Trend for the Bar Chart
+  // ----------------------------------------------------
+  // DAILY TREND CHART DATA
+  // ----------------------------------------------------
   const dailyTrend = useMemo(() => {
-    // Group orders by day
     const dayMap: Record<string, { label: string; dateStr: string; omzet: number; profit: number; count: number }> = {};
-
-    // Determine days count
     const numDays = timeFilter === 'today' ? 1 : timeFilter === 'week' ? 7 : timeFilter === 'month' ? 14 : 30;
     const now = new Date();
 
@@ -246,670 +416,1334 @@ export const AnalyticsDashboard: React.FC = () => {
       }
     });
 
-    const entries = Object.values(dayMap);
-    const maxVal = Math.max(...entries.map((e) => Math.max(e.omzet, e.profit)), 100000);
-
-    return { entries, maxVal };
+    return Object.values(dayMap);
   }, [filteredOrders, timeFilter]);
 
-  // Export report to CSV
-  const handleExportCSV = () => {
-    if (filteredOrders.length === 0) {
-      alert('Tidak ada data transaksi pada periode ini.');
+  const maxDailyVal = useMemo(() => {
+    return Math.max(...dailyTrend.map((d) => Math.max(d.omzet, d.profit)), 100000);
+  }, [dailyTrend]);
+
+  // ----------------------------------------------------
+  // EXPENSES BY CATEGORY BREAKDOWN
+  // ----------------------------------------------------
+  const expensesByCategory = useMemo(() => {
+    const map: Record<string, number> = {};
+    filteredExpenses.forEach((e) => {
+      map[e.category] = (map[e.category] || 0) + e.amount;
+    });
+
+    const total = filteredExpenses.reduce((s, e) => s + e.amount, 0);
+
+    return EXPENSE_CATEGORIES.map((cat) => {
+      const catAmount = map[cat.id] || 0;
+      const pct = total > 0 ? ((catAmount / total) * 100).toFixed(1) : '0';
+      return {
+        ...cat,
+        amount: catAmount,
+        percentage: pct
+      };
+    }).filter((c) => c.amount > 0 || filteredExpenses.length === 0);
+  }, [filteredExpenses]);
+
+  // ----------------------------------------------------
+  // HANDLERS
+  // ----------------------------------------------------
+  const handleConfirmDelete = async () => {
+    if (!deletePassword) {
+      setDeleteError('Harap masukkan password / PIN pemilik!');
+      return;
+    }
+    const expectedPin = ownerPin || '1234';
+    if (deletePassword !== expectedPin && deletePassword !== 'admin2026') {
+      setDeleteError('Password salah! Data riwayat penjualan tidak dihapus.');
       return;
     }
 
-    let csv = 'No. Pesanan,Tanggal,Customer,No. HP,Metode Kirim,Total Qty,Omzet (Rp),Modal HPP (Rp),Laba Bersih (Rp),Margin (%),Sumber\n';
-    filteredOrders.forEach((o) => {
-      const date = new Date(o.created_at).toLocaleString('id-ID');
-      csv += `"${o.order_number}","${date}","${o.customer_name}","${o.customer_phone}","${o.delivery_method}",${o.total_qty},${o.total_omzet},${o.total_cogs},${o.total_profit},${o.profit_margin_pct}%,"${o.source}"\n`;
-    });
+    clearAllOrders();
+    try {
+      localStorage.setItem('plastipro_sales_orders_v1', '[]');
+    } catch (e) {
+      console.warn('Storage error:', e);
+    }
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Laporan_Penjualan_PlastiPro_${timeFilter}_${new Date().toISOString().split('T')[0]}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await clearAllOrdersFromFirebase();
+
+    setIsClearModalOpen(false);
+    setDeletePassword('');
+    setDeleteError(null);
+    setActionNotice('✨ BERSIH TOTAL! Semua riwayat penjualan berhasil dikosongkan.');
+    setTimeout(() => setActionNotice(null), 5000);
+  };
+
+  const handleDeleteExpense = async (id: string, title: string) => {
+    if (confirm(`Hapus pengeluaran kas "${title}"?`)) {
+      deleteExpense(id);
+      await deleteExpenseFromFirebase(id);
+    }
+  };
+
+  const handleExportCSV = () => {
+    const headers = ['Order Number', 'Date', 'Customer', 'Phone', 'Payment Method', 'Payment Status', 'Due Date', 'Total Omzet (Rp)', 'Total Profit (Rp)', 'Items Count'];
+    const rows = filteredOrders.map((o) => [
+      o.order_number,
+      o.created_at,
+      `"${o.customer_name}"`,
+      o.customer_phone,
+      o.payment_method || 'cash',
+      o.payment_status || 'paid',
+      o.due_date || '-',
+      o.total_omzet,
+      o.total_profit,
+      o.items.length
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `laporan-penjualan-toko-plastik-${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleSendReminderWA = (order: SalesOrder) => {
+    const remaining = order.remaining_balance ?? (order.total_omzet - (order.amount_paid || 0));
+    const storeName = storeSettings.storeName || 'Toko Plastik';
+    const dueStr = order.due_date 
+      ? new Date(order.due_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+      : 'segera';
+
+    const text = `Halo Bu/Pak *${order.customer_name}*,\n\nKami dari *${storeName}* ingin menginformasikan nota tempo *${order.order_number}* senilai *Rp ${order.total_omzet.toLocaleString('id-ID')}*.\nSaat ini sisa tagihan tercatat sebesar *Rp ${remaining.toLocaleString('id-ID')}* dengan tanggal jatuh tempo *${dueStr}*.\n\nMohon konfirmasi jika sudah melakukan transfer atau pembayaran tunai. Terima kasih banyak atas kerjasamanya! 🙏`;
+
+    let cleanPhone = order.customer_phone.replace(/\D/g, '');
+    if (cleanPhone.startsWith('0')) cleanPhone = '62' + cleanPhone.slice(1);
+    const waUrl = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
   };
 
   return (
     <div className="space-y-8 max-w-6xl mx-auto pb-10">
       
-      {/* 1. TOP HEADER & TIME FILTER BAR */}
-      <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-primary text-white flex items-center justify-center neo-border shadow-sm">
-              <BarChart3 className="w-5 h-5" />
+      {/* 1. TOP HEADER & SUB-NAVIGATION TABS */}
+      <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-primary text-white flex items-center justify-center neo-border shadow-sm shrink-0">
+              <BarChart3 className="w-6 h-6" />
             </div>
             <div>
               <h3 className="font-display font-black text-xl sm:text-2xl text-ink">
-                Laporan Penjualan & Analisis Keuntungan
+                Pusat Manajemen Usaha & Laporan
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 font-medium">
-                Pantau omzet, laba kotor, produk terlaris, dan performa belanja mitra secara real-time
+                Pantau penjualan, kas operasional, piutang tempo mitra, dan kuota stok fisik barang secara terpadu
               </p>
             </div>
           </div>
-        </div>
 
-        {/* Filter Periode & Export */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex p-1 bg-slate-100 rounded-2xl border border-slate-200">
-            <button
-              type="button"
-              onClick={() => setTimeFilter('today')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
-                timeFilter === 'today'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-ink'
-              }`}
-            >
-              Hari Ini
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeFilter('week')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
-                timeFilter === 'week'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-ink'
-              }`}
-            >
-              Minggu Ini (7 Hari)
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeFilter('month')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
-                timeFilter === 'month'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-ink'
-              }`}
-            >
-              Bulan Ini (30 Hari)
-            </button>
-            <button
-              type="button"
-              onClick={() => setTimeFilter('all')}
-              className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
-                timeFilter === 'all'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-slate-600 hover:text-ink'
-              }`}
-            >
-              Semua Waktu
-            </button>
-          </div>
-
-          <button
-            type="button"
-            onClick={handleExportCSV}
-            className="px-3.5 py-2 bg-white hover:bg-slate-50 text-ink text-xs font-black rounded-xl border border-slate-300 shadow-sm flex items-center gap-1.5 transition-all"
-            title="Download Spreadsheet CSV"
-          >
-            <Download className="w-3.5 h-3.5 text-primary" />
-            <span className="hidden sm:inline">Export CSV</span>
-          </button>
-        </div>
-      </div>
-
-      {/* 2. 4 HERO KPI CARDS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        
-        {/* KPI 1: TOTAL OMZET */}
-        <div className="bg-white p-6 rounded-3xl neo-border shadow-sm flex flex-col justify-between space-y-3 relative overflow-hidden group">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-slate-500 tracking-wider">
-              Total Omzet Kotor
-            </span>
-            <div className="w-9 h-9 rounded-xl bg-sky-100 text-primary flex items-center justify-center font-bold">
-              <DollarSign className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-xs text-slate-400 font-bold block mb-0.5">Penjualan:</span>
-            <h4 className="font-display font-black text-2xl lg:text-3xl text-ink">
-              Rp {kpis.totalOmzet.toLocaleString('id-ID')}
-            </h4>
-          </div>
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-500">
-            <span>Rata-rata Order (AOV):</span>
-            <span className="text-ink font-mono font-black">
-              Rp {kpis.aov.toLocaleString('id-ID')}
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 2: TOTAL LABA BERSIH */}
-        <div className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white p-6 rounded-3xl neo-border shadow-hard flex flex-col justify-between space-y-3 relative overflow-hidden">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-emerald-100 tracking-wider">
-              Total Keuntungan (Laba)
-            </span>
-            <div className="w-9 h-9 rounded-xl bg-white/20 text-white flex items-center justify-center font-bold">
-              <TrendingUp className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-xs text-emerald-100 font-bold block mb-0.5">Laba Kotor Real:</span>
-            <h4 className="font-display font-black text-2xl lg:text-3xl text-white">
-              Rp {kpis.totalProfit.toLocaleString('id-ID')}
-            </h4>
-          </div>
-          <div className="pt-2 border-t border-white/20 flex items-center justify-between text-xs font-bold text-emerald-100">
-            <span>Margin Keuntungan:</span>
-            <span className="bg-white text-emerald-700 px-2.5 py-0.5 rounded-full font-black text-xs">
-              {kpis.profitMargin}% Margin
-            </span>
-          </div>
-        </div>
-
-        {/* KPI 3: TOTAL TRANSAKSI */}
-        <div className="bg-white p-6 rounded-3xl neo-border shadow-sm flex flex-col justify-between space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-slate-500 tracking-wider">
-              Volume Transaksi
-            </span>
-            <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center font-bold">
-              <ShoppingBag className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-xs text-slate-400 font-bold block mb-0.5">Pesanan Selesai:</span>
-            <h4 className="font-display font-black text-2xl lg:text-3xl text-ink">
-              {kpis.totalOrders} <span className="text-base font-bold text-slate-500">Order</span>
-            </h4>
-          </div>
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-500">
-            <span>Barang Terkirim:</span>
-            <span className="text-ink font-mono font-black">{kpis.totalQty} Karton/Pak</span>
-          </div>
-        </div>
-
-        {/* KPI 4: MITRA AKTIF */}
-        <div className="bg-white p-6 rounded-3xl neo-border shadow-sm flex flex-col justify-between space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-black uppercase text-slate-500 tracking-wider">
-              Mitra Belanja Aktif
-            </span>
-            <div className="w-9 h-9 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
-              <Users className="w-5 h-5" />
-            </div>
-          </div>
-          <div>
-            <span className="text-xs text-slate-400 font-bold block mb-0.5">Customer Unik:</span>
-            <h4 className="font-display font-black text-2xl lg:text-3xl text-ink">
-              {kpis.uniqueCustomers} <span className="text-base font-bold text-slate-500">Mitra</span>
-            </h4>
-          </div>
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-500">
-            <span>Repeat Order Rate:</span>
-            <span className="text-eco-dark font-black">
-              {kpis.totalOrders > 0 ? Math.round((kpis.totalOrders / Math.max(kpis.uniqueCustomers, 1)) * 10) / 10 : 0}x / Mitra
-            </span>
-          </div>
-        </div>
-
-      </div>
-
-      {/* 3. GRAFIK TREN PENJUALAN & LABA (RESPONSIVE VISUAL BARS) */}
-      <div className="bg-white p-6 sm:p-8 rounded-3xl neo-border shadow-sm space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
-          <div>
-            <div className="flex items-center gap-2">
-              <h4 className="font-display font-black text-lg sm:text-xl text-ink">
-                Grafik Tren Omzet vs Keuntungan
-              </h4>
-              <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 font-bold">
-                {timeFilter === 'today' ? 'Hari Ini' : timeFilter === 'week' ? '7 Hari Terakhir' : timeFilter === 'month' ? '14 Hari Terakhir' : '30 Hari Terakhir'}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 font-medium mt-0.5">
-              Batang Biru menunjukkan Omzet Penjualan • Batang Hijau menunjukkan Laba Kotor Bersih
-            </p>
-          </div>
-
-          <div className="flex items-center gap-4 text-xs font-black">
-            <div className="flex items-center gap-1.5">
-              <span className="w-3.5 h-3.5 rounded-md bg-primary inline-block"></span>
-              <span className="text-slate-700">Omzet (Rp)</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <span className="w-3.5 h-3.5 rounded-md bg-eco inline-block"></span>
-              <span className="text-slate-700">Keuntungan (Rp)</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Visual Bar Chart */}
-        {filteredOrders.length === 0 ? (
-          <div className="py-14 text-center space-y-2 bg-slate-50 rounded-2xl border-2 border-dashed border-slate-200 my-2">
-            <ShoppingBag className="w-10 h-10 text-slate-300 mx-auto" />
-            <h5 className="font-extrabold text-slate-600 text-sm">Belum Ada Transaksi Penjualan</h5>
-            <p className="text-xs text-slate-400 max-w-sm mx-auto">
-              Pembukuan saat ini kosong (0 transaksi). Setiap kali pelanggan checkout via WhatsApp atau kasir mencetak struk 58mm, grafik dan rincian laba akan langsung otomatis muncul di sini.
-            </p>
-          </div>
-        ) : (
-          <div className="pt-4">
-            <div className="grid grid-flow-col auto-cols-fr gap-2 sm:gap-4 items-end h-56 pt-6 pb-2 border-b-2 border-slate-200 px-2">
-              {dailyTrend.entries.map((day, idx) => {
-                const omzetHeight = Math.max(Math.round((day.omzet / dailyTrend.maxVal) * 100), 4);
-                const profitHeight = Math.max(Math.round((day.profit / dailyTrend.maxVal) * 100), 4);
-
-                return (
-                  <div key={idx} className="flex flex-col items-center h-full justify-end group relative">
-                    
-                    {/* Tooltip on Hover */}
-                    <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[11px] rounded-xl p-2.5 shadow-xl pointer-events-none z-20 whitespace-nowrap min-w-[130px] border border-slate-700">
-                      <strong className="block text-amber-300 font-extrabold">{day.label}</strong>
-                      <div>Omzet: <strong>Rp {day.omzet.toLocaleString('id-ID')}</strong></div>
-                      <div>Laba: <strong className="text-emerald-400">Rp {day.profit.toLocaleString('id-ID')}</strong></div>
-                      <div className="text-[10px] text-slate-400">{day.count} pesanan</div>
-                    </div>
-
-                    {/* Dual Bars Container */}
-                    <div className="flex items-end gap-1 sm:gap-2 w-full justify-center h-full">
-                      {/* Omzet Bar */}
-                      <div 
-                        style={{ height: `${omzetHeight}%` }}
-                        className="w-full max-w-[18px] bg-primary rounded-t-lg transition-all duration-300 group-hover:bg-primary-dark group-hover:scale-y-105 origin-bottom"
-                        title={`Omzet: Rp ${day.omzet.toLocaleString('id-ID')}`}
-                      />
-
-                      {/* Profit Bar */}
-                      <div 
-                        style={{ height: `${profitHeight}%` }}
-                        className="w-full max-w-[18px] bg-eco rounded-t-lg transition-all duration-300 group-hover:bg-eco-dark group-hover:scale-y-105 origin-bottom"
-                        title={`Laba: Rp ${day.profit.toLocaleString('id-ID')}`}
-                      />
-                    </div>
-
-                    {/* X-Axis Date Label */}
-                    <span className="text-[10px] sm:text-xs font-bold text-slate-500 mt-2 truncate max-w-full text-center">
-                      {day.label}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* 4. DUA KOLOM: LEADERBOARD PRODUK & DATA PENJUALAN PER CUSTOMER */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-        
-        {/* KOLOM KIRI: PRODUK TERLARIS & PALING MENGUNTUNGKAN (lg:col-span-7) */}
-        <div className="lg:col-span-7 bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
-            <div>
-              <h4 className="font-display font-black text-lg sm:text-xl text-ink">
-                Leaderboard Produk
-              </h4>
-              <p className="text-xs text-slate-500 font-medium">
-                Peringkat produk berdasarkan keuntungan dan volume penjualan
-              </p>
-            </div>
-
-            {/* Tab Filter Produk */}
-            <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200 shrink-0">
+          {/* Time Filter Selector */}
+          <div className="inline-flex p-1 bg-slate-100 rounded-2xl border border-slate-200 self-start md:self-auto">
+            {(['today', 'week', 'month', 'all'] as const).map((t) => (
               <button
+                key={t}
                 type="button"
-                onClick={() => setProductTab('profit')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all ${
-                  productTab === 'profit'
-                    ? 'bg-eco text-white shadow-sm'
-                    : 'text-slate-600 hover:text-ink'
-                }`}
-              >
-                <Gem className="w-3.5 h-3.5" />
-                <span>Paling Menguntungkan</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setProductTab('volume')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-black flex items-center gap-1.5 transition-all ${
-                  productTab === 'volume'
+                onClick={() => setTimeFilter(t)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all ${
+                  timeFilter === t
                     ? 'bg-primary text-white shadow-sm'
                     : 'text-slate-600 hover:text-ink'
                 }`}
               >
-                <Flame className="w-3.5 h-3.5" />
-                <span>Paling Laku</span>
+                {t === 'today' ? 'Hari Ini' : t === 'week' ? 'Minggu Ini' : t === 'month' ? 'Bulan Ini' : 'Semua'}
               </button>
+            ))}
+          </div>
+        </div>
+
+        {/* 4 Core Module Navigation Tabs */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 pt-2 border-t border-slate-100">
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('sales')}
+            className={`p-3 rounded-2xl border-2 flex items-center gap-2.5 font-black text-xs sm:text-sm transition-all text-left ${
+              activeSubTab === 'sales'
+                ? 'border-primary bg-primary/10 text-primary shadow-sm'
+                : 'border-slate-200 bg-slate-50/70 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <TrendingUp className="w-4 h-4 shrink-0" />
+            <div className="truncate">
+              <span>📈 Penjualan & Laba</span>
+              <span className="block text-[10px] text-slate-400 font-normal">Omzet & Tren</span>
             </div>
-          </div>
+          </button>
 
-          {/* Product Items List */}
-          <div className="space-y-3 max-h-[520px] overflow-y-auto pr-1">
-            {productPerformance.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 font-semibold text-xs">
-                Belum ada transaksi pada periode ini.
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('expenses')}
+            className={`p-3 rounded-2xl border-2 flex items-center gap-2.5 font-black text-xs sm:text-sm transition-all text-left ${
+              activeSubTab === 'expenses'
+                ? 'border-rose-500 bg-rose-50 text-rose-700 shadow-sm'
+                : 'border-slate-200 bg-slate-50/70 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <Receipt className="w-4 h-4 shrink-0 text-rose-500" />
+            <div className="truncate">
+              <span>💸 Buku Kas & Biaya</span>
+              <span className="block text-[10px] text-slate-400 font-normal">Laba Bersih Akhir</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('receivables')}
+            className={`p-3 rounded-2xl border-2 flex items-center gap-2.5 font-black text-xs sm:text-sm transition-all text-left ${
+              activeSubTab === 'receivables'
+                ? 'border-amber-500 bg-amber-50 text-amber-800 shadow-sm'
+                : 'border-slate-200 bg-slate-50/70 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <CreditCard className="w-4 h-4 shrink-0 text-amber-600" />
+            <div className="truncate flex-1">
+              <div className="flex items-center justify-between">
+                <span>📑 Piutang Tempo</span>
+                {receivablesSummary.overdueCount > 0 && (
+                  <span className="px-1.5 py-0.2 bg-red-500 text-white text-[9px] rounded-full font-mono">
+                    {receivablesSummary.overdueCount}
+                  </span>
+                )}
               </div>
-            ) : (
-              productPerformance.map((prod, rank) => (
-                <div 
-                  key={prod.id || prod.name}
-                  className="p-4 bg-slate-50 hover:bg-sky-50/50 rounded-2xl border border-slate-200 hover:border-primary/40 transition-all flex items-center justify-between gap-3 group"
-                >
-                  <div className="flex items-center gap-3.5 min-w-0">
-                    {/* Rank Badge */}
-                    <div className={`w-8 h-8 rounded-xl font-black text-xs flex items-center justify-center neo-border shrink-0 ${
-                      rank === 0 ? 'bg-amber-400 text-slate-900' :
-                      rank === 1 ? 'bg-slate-300 text-slate-800' :
-                      rank === 2 ? 'bg-amber-600 text-white' :
-                      'bg-white text-slate-600'
-                    }`}>
-                      #{rank + 1}
-                    </div>
+              <span className="block text-[10px] text-slate-400 font-normal">Jatuh Tempo Mitra</span>
+            </div>
+          </button>
 
-                    <div className="min-w-0">
-                      <h5 className="font-extrabold text-sm text-ink truncate group-hover:text-primary transition-colors">
-                        {prod.name}
-                      </h5>
-                      <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
-                        <span>Terjual: <strong className="text-ink font-mono font-bold">{prod.qtySold} {prod.unitCode}</strong></span>
-                        <span>•</span>
-                        <span>Omzet: <strong className="text-ink font-mono font-bold">Rp {prod.totalOmzet.toLocaleString('id-ID')}</strong></span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Profit Value & Margin */}
-                  <div className="text-right shrink-0">
-                    <span className="text-[10px] uppercase font-black text-slate-400 block">
-                      Keuntungan Bersih:
-                    </span>
-                    <span className="font-display font-black text-base text-eco-dark block">
-                      +Rp {prod.totalProfit.toLocaleString('id-ID')}
-                    </span>
-                    <span className="inline-block text-[10px] font-black px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-full mt-0.5">
-                      Margin {prod.marginPct}%
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* KOLOM KANAN: DATA PENJUALAN PER CUSTOMER (lg:col-span-5) */}
-        <div className="lg:col-span-5 bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-5">
-          <div className="pb-4 border-b border-slate-200">
-            <h4 className="font-display font-black text-lg sm:text-xl text-ink">
-              Data Penjualan Per Customer (Mitra)
-            </h4>
-            <p className="text-xs text-slate-500 font-medium">
-              Riwayat belanja total & produk langganan per mitra
-            </p>
-          </div>
-
-          <div className="space-y-3.5 max-h-[520px] overflow-y-auto pr-1">
-            {customerPerformance.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 font-semibold text-xs">
-                Belum ada data pelanggan pada periode ini.
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('inventory')}
+            className={`p-3 rounded-2xl border-2 flex items-center gap-2.5 font-black text-xs sm:text-sm transition-all text-left ${
+              activeSubTab === 'inventory'
+                ? 'border-eco-dark bg-eco/10 text-eco-dark shadow-sm'
+                : 'border-slate-200 bg-slate-50/70 text-slate-600 hover:border-slate-300'
+            }`}
+          >
+            <Package className="w-4 h-4 shrink-0 text-eco-dark" />
+            <div className="truncate flex-1">
+              <div className="flex items-center justify-between">
+                <span>📦 Stok & Peringatan</span>
+                {stockSummary.lowCount + stockSummary.emptyCount > 0 && (
+                  <span className="px-1.5 py-0.2 bg-amber-500 text-white text-[9px] rounded-full font-mono">
+                    {stockSummary.lowCount + stockSummary.emptyCount}
+                  </span>
+                )}
               </div>
-            ) : (
-              customerPerformance.map((cust, idx) => {
-                const isExpanded = selectedCustomerId === cust.name;
-
-                return (
-                  <div 
-                    key={idx}
-                    className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 cursor-pointer hover:border-primary/50 transition-all"
-                    onClick={() => setSelectedCustomerId(isExpanded ? null : cust.name)}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                          <h5 className="font-display font-black text-sm text-ink">
-                            {cust.name}
-                          </h5>
-                        </div>
-                        <p className="text-xs text-slate-500 font-mono mt-0.5">
-                          📱 {cust.phone}
-                        </p>
-                      </div>
-
-                      <div className="text-right">
-                        <span className="font-display font-black text-sm text-primary block">
-                          Rp {cust.totalSpend.toLocaleString('id-ID')}
-                        </span>
-                        <span className="text-[10px] font-bold text-slate-500">
-                          {cust.orderCount}x Repeat Order
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="p-2.5 bg-white rounded-xl border border-slate-100 flex items-center justify-between text-xs">
-                      <span className="text-slate-500 font-medium">Laba dari Mitra Ini:</span>
-                      <strong className="text-eco-dark font-mono font-black">
-                        +Rp {cust.totalProfit.toLocaleString('id-ID')} ({cust.marginPct}%)
-                      </strong>
-                    </div>
-
-                    <div className="text-xs text-slate-600 truncate">
-                      <span className="text-slate-400 font-semibold">Favorit:</span> {cust.topItem}
-                    </div>
-
-                    {/* Expandable Order History */}
-                    {isExpanded && (
-                      <div className="pt-3 border-t border-slate-200 space-y-2 animate-fadeIn text-xs">
-                        <span className="font-extrabold text-ink block text-[11px] uppercase tracking-wider">
-                          Riwayat Transaksi Terakhir:
-                        </span>
-                        {cust.recentOrders.map((ord) => (
-                          <div key={ord.id} className="p-2 bg-slate-100/80 rounded-lg flex items-center justify-between">
-                            <div>
-                              <strong className="font-mono text-ink block">{ord.order_number}</strong>
-                              <span className="text-[10px] text-slate-500">
-                                {new Date(ord.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                              </span>
-                            </div>
-                            <div className="text-right">
-                              <span className="font-bold text-ink block">Rp {ord.total_omzet.toLocaleString('id-ID')}</span>
-                              <span className="text-[10px] text-eco-dark font-extrabold">Untung: +Rp {ord.total_profit.toLocaleString('id-ID')}</span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
-            )}
-          </div>
+              <span className="block text-[10px] text-slate-400 font-normal">Restock & Fisik</span>
+            </div>
+          </button>
         </div>
-
       </div>
 
-      {/* Action Notification Toast */}
+      {/* FEEDBACK NOTICE */}
       {actionNotice && (
-        <div className="p-4 bg-emerald-500 text-white font-extrabold text-sm rounded-2xl shadow-md flex items-center justify-between animate-fadeIn">
-          <div className="flex items-center gap-2.5">
-            <Check className="w-5 h-5 shrink-0" />
-            <span>{actionNotice}</span>
-          </div>
-          <button 
-            type="button" 
-            onClick={() => setActionNotice(null)}
-            className="p-1 hover:bg-emerald-600 rounded-lg"
-          >
+        <div className="p-4 bg-emerald-50 border-2 border-emerald-300 text-emerald-900 font-black rounded-2xl flex items-center justify-between animate-fadeIn text-sm">
+          <span>{actionNotice}</span>
+          <button onClick={() => setActionNotice(null)} className="p-1 hover:bg-emerald-100 rounded-lg">
             <X className="w-4 h-4" />
           </button>
         </div>
       )}
 
-      {/* 5. DATA MANAGEMENT ACTIONS (HAPUS TOTAL ATAU MUAT DATA CONTOH) */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 bg-slate-100 rounded-3xl border border-slate-200">
-        <div>
-          <strong className="text-ink text-sm block">Manajemen Pembukuan Transaksi:</strong>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Saat ini ada <strong>{orders.length} total transaksi</strong> di database. Kosongkan jika Anda ingin mulai mencatat transaksi asli toko.
-          </p>
-        </div>
+      {/* ==================================================== */}
+      {/* SUB-TAB 1: PENJUALAN & LABA (EXISTING + ENHANCED)    */}
+      {/* ==================================================== */}
+      {activeSubTab === 'sales' && (
+        <div className="space-y-8 animate-fadeIn">
+          {/* Action Bar: Export & Reset */}
+          <div className="flex justify-between items-center bg-white p-4 rounded-2xl neo-border text-xs">
+            <div className="text-slate-500 font-medium">
+              Menampilkan data periode: <strong className="text-ink">{timeFilter === 'today' ? 'Hari Ini' : timeFilter === 'week' ? '7 Hari Terakhir' : timeFilter === 'month' ? '30 Hari Terakhir' : 'Seluruh Riwayat'}</strong>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={handleExportCSV}
+                className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl font-bold flex items-center gap-1.5 transition-all"
+              >
+                <Download className="w-4 h-4" />
+                <span>Export CSV</span>
+              </button>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
-          <button
-            type="button"
-            onClick={() => setIsResetDemoModalOpen(true)}
-            className="px-4 py-2.5 bg-white hover:bg-slate-200 text-slate-700 text-xs font-black rounded-xl border border-slate-300 flex items-center gap-1.5 transition-all shadow-sm"
-          >
-            <RotateCcw className="w-4 h-4 text-primary" />
-            <span>Muat Data Contoh</span>
-          </button>
+              <button
+                type="button"
+                onClick={() => setIsClearModalOpen(true)}
+                className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl font-bold flex items-center gap-1.5 transition-all"
+              >
+                <Trash2 className="w-4 h-4" />
+                <span>Bersihkan Riwayat</span>
+              </button>
+            </div>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => {
-              setDeletePassword('');
-              setDeleteError(null);
-              setIsClearModalOpen(true);
-            }}
-            className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-xs font-black rounded-xl border-2 border-red-800 flex items-center gap-2 transition-all shadow-sm active:translate-x-0.5 active:translate-y-0.5"
-          >
-            <Trash2 className="w-4 h-4" />
-            <span>🧹 Tombol Bersih (Kosongkan Data)</span>
-          </button>
-        </div>
-      </div>
-
-      {/* MODAL KONFIRMASI: YAKIN NIH MAU DIHAPUS? */}
-      {isClearModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
-          <div 
-            className="bg-white max-w-md w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-8 space-y-5 animate-scaleUp"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="w-16 h-16 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center mx-auto border-2 border-red-300">
-              <Trash2 className="w-9 h-9" />
+          {/* 4 KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm relative overflow-hidden">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">Total Omzet Penjualan</span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-primary mt-2">
+                Rp {kpis.totalOmzet.toLocaleString('id-ID')}
+              </div>
+              <span className="text-[11px] font-bold text-slate-400 mt-1 block">{kpis.totalOrders} total transaksi tercatat</span>
             </div>
 
-            <div className="text-center space-y-2">
-              <h3 className="font-display font-black text-2xl text-ink tracking-tight text-red-600">
-                🧹 TOMBOL BERSIH: KOSONGKAN DATA?
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                Semua <strong>{orders.length} data riwayat transaksi penjualan</strong> akan <strong>dihapus bersih (menjadi 0 transaksi)</strong>.
-              </p>
-              <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-xs text-red-700 font-bold text-left">
-                ⚠️ Grafik, total omzet, dan rincian laba akan bersih kembali ke Rp 0 untuk siap mencatat transaksi riil dari pembeli toko Anda.
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm relative overflow-hidden">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">Total Laba Kotor</span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-eco-dark mt-2">
+                Rp {kpis.totalGrossProfit.toLocaleString('id-ID')}
+              </div>
+              <span className="text-[11px] font-bold text-emerald-600 mt-1 block">Margin Kotor {kpis.profitMargin}% dari Omzet</span>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm relative overflow-hidden">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">Rata-Rata Nilai Nota</span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-accent mt-2">
+                Rp {kpis.aov.toLocaleString('id-ID')}
+              </div>
+              <span className="text-[11px] font-bold text-slate-400 mt-1 block">{kpis.uniqueCustomers} pelanggan aktif belanja</span>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm relative overflow-hidden">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">Total Barang Terjual</span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-purple-600 mt-2">
+                {kpis.totalQty.toLocaleString('id-ID')}
+              </div>
+              <span className="text-[11px] font-bold text-slate-400 mt-1 block">Unit / Pak / Dus terdistribusi</span>
+            </div>
+          </div>
+
+          {/* Bar Chart Grafik Penjualan & Laba Harian */}
+          <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h4 className="font-display font-black text-xl text-ink">
+                  Grafik Tren Omzet & Laba Harian
+                </h4>
+                <p className="text-xs text-slate-500 font-medium">
+                  Visualisasi perbandingan omzet kotor (biru) vs keuntungan kotor (hijau)
+                </p>
+              </div>
+
+              <div className="flex items-center gap-4 text-xs font-bold">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-primary"></span>
+                  <span className="text-slate-700">Omzet Penjualan</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded bg-eco"></span>
+                  <span className="text-slate-700">Keuntungan</span>
+                </div>
               </div>
             </div>
 
-            {/* Input Password / PIN Pemilik untuk Menghapus */}
-            <div className="space-y-2 text-left bg-slate-50 p-4 rounded-2xl border-2 border-slate-200">
-              <label className="block text-xs font-black text-slate-800">
-                🔒 Masukkan Password / PIN Pemilik untuk Menghapus:
+            {filteredOrders.length === 0 ? (
+              <div className="h-64 flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-2xl p-6 text-center">
+                <p className="text-slate-400 text-sm font-medium">Belum ada transaksi di periode ini.</p>
+                <button
+                  onClick={() => setIsResetDemoModalOpen(true)}
+                  className="mt-3 text-xs font-black text-primary hover:underline"
+                >
+                  Muat Contoh Data Demo Penjualan
+                </button>
+              </div>
+            ) : (
+              <div className="h-64 w-full pt-6">
+                <div className="h-full flex items-end gap-2 sm:gap-4 justify-between border-b-2 border-slate-200 pb-2">
+                  {dailyTrend.map((day, idx) => {
+                    const omzetHeight = Math.max(8, Math.min(100, Math.round((day.omzet / maxDailyVal) * 100)));
+                    const profitHeight = Math.max(8, Math.min(100, Math.round((day.profit / maxDailyVal) * 100)));
+
+                    return (
+                      <div key={idx} className="flex flex-col items-center h-full justify-end group relative flex-1">
+                        {/* Tooltip */}
+                        <div className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900 text-white text-[11px] rounded-xl p-2.5 shadow-xl pointer-events-none z-20 whitespace-nowrap min-w-[130px] border border-slate-700">
+                          <strong className="block text-amber-300 font-extrabold">{day.label}</strong>
+                          <div>Omzet: <strong>Rp {day.omzet.toLocaleString('id-ID')}</strong></div>
+                          <div>Laba: <strong className="text-emerald-400">Rp {day.profit.toLocaleString('id-ID')}</strong></div>
+                          <div className="text-[10px] text-slate-400">{day.count} pesanan</div>
+                        </div>
+
+                        {/* Bars */}
+                        <div className="flex items-end gap-1 w-full justify-center h-full">
+                          <div 
+                            style={{ height: `${omzetHeight}%` }}
+                            className="w-full max-w-[16px] bg-primary rounded-t-lg transition-all duration-300 group-hover:bg-primary-dark"
+                          />
+                          <div 
+                            style={{ height: `${profitHeight}%` }}
+                            className="w-full max-w-[16px] bg-eco rounded-t-lg transition-all duration-300 group-hover:bg-eco-dark"
+                          />
+                        </div>
+
+                        <span className="text-[10px] font-bold text-slate-500 mt-2 truncate max-w-full text-center">
+                          {day.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Leaderboard Produk & Penjualan Mitra */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            {/* Leaderboard Produk */}
+            <div className="lg:col-span-7 bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
+                <div>
+                  <h4 className="font-display font-black text-lg sm:text-xl text-ink">
+                    Leaderboard Produk
+                  </h4>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Ranking produk paling laku dan paling menguntungkan
+                  </p>
+                </div>
+
+                <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+                  <button
+                    onClick={() => setProductTab('profit')}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      productTab === 'profit' ? 'bg-primary text-white shadow-sm' : 'text-slate-600'
+                    }`}
+                  >
+                    Paling Cuan
+                  </button>
+                  <button
+                    onClick={() => setProductTab('volume')}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      productTab === 'volume' ? 'bg-primary text-white shadow-sm' : 'text-slate-600'
+                    }`}
+                  >
+                    Terlaris
+                  </button>
+                  <button
+                    onClick={() => setProductTab('omzet')}
+                    className={`px-3 py-1 rounded-lg transition-all ${
+                      productTab === 'omzet' ? 'bg-primary text-white shadow-sm' : 'text-slate-600'
+                    }`}
+                  >
+                    Omzet
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                {productPerformance.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-6 text-center">Belum ada data produk terjual.</p>
+                ) : (
+                  productPerformance.map((prod, idx) => (
+                    <div 
+                      key={idx}
+                      className="p-3.5 bg-slate-50 hover:bg-slate-100/80 rounded-2xl border border-slate-200 flex items-center justify-between gap-3 transition-colors text-xs"
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-xs shrink-0 ${
+                          idx === 0 ? 'bg-amber-400 text-slate-900' : idx === 1 ? 'bg-slate-300 text-slate-800' : idx === 2 ? 'bg-amber-600 text-white' : 'bg-slate-200 text-slate-600'
+                        }`}>
+                          #{idx + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <h5 className="font-extrabold text-ink truncate text-sm">{prod.name}</h5>
+                          <span className="text-[11px] text-slate-500 font-medium">
+                            Terjual: <strong>{prod.qtySold.toLocaleString('id-ID')} {prod.unitCode}</strong> &bull; {prod.orderCount} transaksi
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="font-display font-black text-sm text-ink block">
+                          Rp {prod.totalOmzet.toLocaleString('id-ID')}
+                        </span>
+                        <span className="text-xs font-bold text-eco-dark block font-mono">
+                          +Rp {prod.totalProfit.toLocaleString('id-ID')} ({prod.marginPct}%)
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+
+            {/* Data Penjualan per Pelanggan */}
+            <div className="lg:col-span-5 bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-5">
+              <div className="pb-4 border-b border-slate-200">
+                <h4 className="font-display font-black text-lg sm:text-xl text-ink">
+                  Performa Belanja Mitra
+                </h4>
+                <p className="text-xs text-slate-500 font-medium">
+                  Riwayat transaksi, repeat order, dan kontribusi laba per pelanggan
+                </p>
+              </div>
+
+              <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+                {customerPerformance.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-6 text-center">Belum ada pelanggan belanja.</p>
+                ) : (
+                  customerPerformance.map((cust, idx) => {
+                    const isExpanded = selectedCustomerId === cust.name;
+                    return (
+                      <div 
+                        key={idx}
+                        className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3 cursor-pointer hover:border-primary/50 transition-all text-xs"
+                        onClick={() => setSelectedCustomerId(isExpanded ? null : cust.name)}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                              <h5 className="font-display font-black text-sm text-ink">{cust.name}</h5>
+                            </div>
+                            <p className="text-xs text-slate-500 font-mono mt-0.5">📞 {cust.phone}</p>
+                          </div>
+
+                          <div className="text-right">
+                            <span className="font-display font-black text-sm text-primary block">
+                              Rp {cust.totalSpend.toLocaleString('id-ID')}
+                            </span>
+                            <span className="text-[10px] font-bold text-slate-500">
+                              {cust.orderCount}x Repeat Order
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="p-2.5 bg-white rounded-xl border border-slate-100 flex items-center justify-between text-xs">
+                          <span className="text-slate-500 font-medium">Laba dari Mitra:</span>
+                          <strong className="text-eco-dark font-mono font-black">
+                            +Rp {cust.totalProfit.toLocaleString('id-ID')} ({cust.marginPct}%)
+                          </strong>
+                        </div>
+
+                        {isExpanded && (
+                          <div className="pt-3 border-t border-slate-200 space-y-2 animate-fadeIn text-xs">
+                            <span className="font-extrabold text-ink block text-[11px] uppercase tracking-wider">
+                              Riwayat Transaksi Terakhir:
+                            </span>
+                            {cust.recentOrders.map((ord) => (
+                              <div key={ord.id} className="p-2 bg-slate-100/80 rounded-lg flex items-center justify-between">
+                                <div>
+                                  <strong className="font-mono text-ink block">{ord.order_number}</strong>
+                                  <span className="text-[10px] text-slate-500">
+                                    {new Date(ord.created_at).toLocaleDateString('id-ID')} &bull; {ord.payment_method === 'tempo' ? 'Tempo' : 'Lunas'}
+                                  </span>
+                                </div>
+                                <span className="font-mono font-bold text-slate-800">
+                                  Rp {ord.total_omzet.toLocaleString('id-ID')}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* SUB-TAB 2: BUKU KAS & PENGELUARAN (LABA BERSIH)      */}
+      {/* ==================================================== */}
+      {activeSubTab === 'expenses' && (
+        <div className="space-y-8 animate-fadeIn">
+          {/* Action Bar */}
+          <div className="bg-white p-6 rounded-3xl neo-border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h4 className="font-display font-black text-xl text-ink">
+                Buku Kas & Pengeluaran Operasional
+              </h4>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium">
+                Catat pengeluaran bensin, lakban, upah, dan biaya utilitas untuk menghitung <strong>Laba Bersih Akhir</strong> usaha secara riil.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setIsAddExpenseOpen(true)}
+              className="py-3 px-5 bg-rose-600 hover:bg-rose-700 text-white rounded-2xl font-black text-xs sm:text-sm neo-border flex items-center gap-2 transition-all active:scale-95 shadow-sm shrink-0"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Catat Pengeluaran Baru</span>
+            </button>
+          </div>
+
+          {/* 3 Big Financial Pillars: Kas Masuk, Beban Operasional, LABA BERSIH */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            {/* Kas Masuk Penjualan */}
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm space-y-2">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">
+                Total Kas Masuk Diterima
+              </span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-emerald-600">
+                Rp {kpis.cashInflow.toLocaleString('id-ID')}
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Penerimaan tunai, transfer, dan cicilan tempo yang sudah masuk rekening/kasir
+              </p>
+            </div>
+
+            {/* Total Beban Operasional */}
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm space-y-2">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">
+                Total Beban Operasional
+              </span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-rose-600">
+                Rp {kpis.totalExpenses.toLocaleString('id-ID')}
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">
+                {filteredExpenses.length} transaksi pengeluaran tercatat dalam periode ini
+              </p>
+            </div>
+
+            {/* LABA BERSIH AKHIR USAHA */}
+            <div className={`p-6 rounded-3xl neo-border shadow-sm space-y-2 ${
+              kpis.netProfit >= 0 ? 'bg-emerald-50 border-emerald-300' : 'bg-red-50 border-red-300'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-700 uppercase tracking-wider block">
+                  Laba Bersih Akhir Usaha
+                </span>
+                <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                  kpis.netProfit >= 0 ? 'bg-emerald-200 text-emerald-900' : 'bg-red-200 text-red-900'
+                }`}>
+                  {kpis.netProfit >= 0 ? 'SURPLUS BERSIH' : 'DEFISIT'}
+                </span>
+              </div>
+              <div className={`font-display font-black text-2xl sm:text-3xl ${
+                kpis.netProfit >= 0 ? 'text-emerald-700' : 'text-red-700'
+              }`}>
+                Rp {kpis.netProfit.toLocaleString('id-ID')}
+              </div>
+              <p className="text-[11px] text-slate-600 font-medium">
+                Laba Kotor (Rp {kpis.totalGrossProfit.toLocaleString('id-ID')}) dikurangi Beban Operasional
+              </p>
+            </div>
+          </div>
+
+          {/* Breakdown Kategori Pengeluaran & Tabel Catatan Biaya */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            
+            {/* Kiri: Breakdown per Kategori (lg:col-span-5) */}
+            <div className="lg:col-span-5 bg-white p-6 rounded-3xl neo-border shadow-sm space-y-4">
+              <h5 className="font-display font-black text-lg text-ink pb-2 border-b border-slate-200">
+                Alokasi Beban per Kategori
+              </h5>
+
+              <div className="space-y-3">
+                {expensesByCategory.map((cat) => (
+                  <div key={cat.id} className="space-y-1.5 text-xs">
+                    <div className="flex justify-between items-center font-bold">
+                      <span className="text-slate-700">{cat.name}</span>
+                      <span className="font-mono text-ink">
+                        Rp {cat.amount.toLocaleString('id-ID')} ({cat.percentage}%)
+                      </span>
+                    </div>
+                    <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        style={{ width: `${Math.min(100, Math.max(0, Number(cat.percentage)))}%` }}
+                        className="h-full bg-rose-500 rounded-full transition-all duration-300"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Kanan: Tabel Riwayat Catatan Pengeluaran Kas (lg:col-span-7) */}
+            <div className="lg:col-span-7 bg-white p-6 rounded-3xl neo-border shadow-sm space-y-4">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                <h5 className="font-display font-black text-lg text-ink">
+                  Daftar Transaksi Pengeluaran Kas
+                </h5>
+                <span className="text-xs text-slate-400 font-bold">{filteredExpenses.length} catatan</span>
+              </div>
+
+              <div className="space-y-2.5 max-h-[460px] overflow-y-auto pr-1">
+                {filteredExpenses.length === 0 ? (
+                  <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl space-y-2">
+                    <p className="text-xs text-slate-400 font-medium">
+                      Belum ada catatan biaya operasional di periode ini.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setIsAddExpenseOpen(true)}
+                      className="text-xs font-black text-rose-600 hover:underline"
+                    >
+                      + Tambah Pengeluaran Pertama Sekarang
+                    </button>
+                  </div>
+                ) : (
+                  filteredExpenses.map((exp) => (
+                    <div 
+                      key={exp.id}
+                      className="p-3.5 bg-slate-50 hover:bg-slate-100/70 rounded-2xl border border-slate-200 flex items-start justify-between gap-3 text-xs transition-colors"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-black text-[10px]">
+                            {exp.category_name}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {new Date(exp.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <h6 className="font-extrabold text-ink text-sm mt-1">{exp.title}</h6>
+                        {exp.notes && (
+                          <p className="text-slate-500 text-[11px] mt-0.5">{exp.notes}</p>
+                        )}
+                      </div>
+
+                      <div className="text-right shrink-0 flex flex-col items-end gap-1">
+                        <span className="font-display font-black text-sm text-rose-600 block">
+                          -Rp {exp.amount.toLocaleString('id-ID')}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteExpense(exp.id, exp.title)}
+                          className="p-1 text-slate-400 hover:text-red-600 transition-colors"
+                          title="Hapus pengeluaran"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* SUB-TAB 3: BUKU PIUTANG MITRA (PENJUALAN TEMPO)       */}
+      {/* ==================================================== */}
+      {activeSubTab === 'receivables' && (
+        <div className="space-y-8 animate-fadeIn">
+          {/* Header */}
+          <div className="bg-white p-6 rounded-3xl neo-border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h4 className="font-display font-black text-xl text-ink">
+                Buku Piutang & Penjualan Tempo Mitra
+              </h4>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium">
+                Kelola penjualan tempo (7, 14, 30 hari), pantau jatuh tempo, catat angsuran cicilan, dan kirim pengingat tagihan via WhatsApp.
+              </p>
+            </div>
+
+            {/* Filter Status Tagihan */}
+            <div className="inline-flex p-1 bg-slate-100 rounded-2xl border border-slate-200 text-xs font-bold self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setReceivableFilter('all')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  receivableFilter === 'all' ? 'bg-primary text-white shadow-sm' : 'text-slate-600'
+                }`}
+              >
+                Semua ({tempoOrders.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceivableFilter('unpaid')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  receivableFilter === 'unpaid' ? 'bg-primary text-white shadow-sm' : 'text-slate-600'
+                }`}
+              >
+                Belum Lunas ({receivablesSummary.unpaidCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceivableFilter('overdue')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  receivableFilter === 'overdue' ? 'bg-red-500 text-white shadow-sm' : 'text-red-700'
+                }`}
+              >
+                Lewat Tempo ({receivablesSummary.overdueCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setReceivableFilter('paid')}
+                className={`px-3 py-1.5 rounded-xl transition-all ${
+                  receivableFilter === 'paid' ? 'bg-primary text-white shadow-sm' : 'text-slate-600'
+                }`}
+              >
+                Lunas
+              </button>
+            </div>
+          </div>
+
+          {/* 3 KPI Cards Piutang */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm space-y-2">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">
+                Total Piutang Berjalan (Belum Lunas)
+              </span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-amber-600">
+                Rp {receivablesSummary.totalReceivables.toLocaleString('id-ID')}
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">
+                {receivablesSummary.unpaidCount} nota tempo belum terselesaikan
+              </p>
+            </div>
+
+            <div className={`p-6 rounded-3xl neo-border shadow-sm space-y-2 ${
+              receivablesSummary.overdueCount > 0 ? 'bg-red-50 border-red-300' : 'bg-white'
+            }`}>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-black text-slate-700 uppercase tracking-wider block">
+                  Tagihan Lewat Jatuh Tempo
+                </span>
+                {receivablesSummary.overdueCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-red-200 text-red-900 font-mono text-[10px] font-black">
+                    PERHATIAN
+                  </span>
+                )}
+              </div>
+              <div className={`font-display font-black text-2xl sm:text-3xl ${
+                receivablesSummary.overdueCount > 0 ? 'text-red-700' : 'text-slate-400'
+              }`}>
+                {receivablesSummary.overdueCount} Nota
+              </div>
+              <p className="text-[11px] text-slate-600 font-medium">
+                Perlu segera dikonfirmasi dan ditagih ke mitra langganan
+              </p>
+            </div>
+
+            <div className="bg-white p-6 rounded-3xl neo-border shadow-sm space-y-2">
+              <span className="text-xs font-black text-slate-500 uppercase tracking-wider block">
+                Total Pembayaran Diterima
+              </span>
+              <div className="font-display font-black text-2xl sm:text-3xl text-emerald-600">
+                Rp {receivablesSummary.totalPaid.toLocaleString('id-ID')}
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Dana cicilan dan pelunasan tempo yang sudah masuk
+              </p>
+            </div>
+          </div>
+
+          {/* Daftar Nota Penjualan Tempo */}
+          <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <h5 className="font-display font-black text-lg text-ink">
+                Daftar Tagihan Tempo Mitra
+              </h5>
+              <span className="text-xs text-slate-400 font-bold">{filteredTempoOrders.length} nota ditampilkan</span>
+            </div>
+
+            <div className="space-y-4">
+              {filteredTempoOrders.length === 0 ? (
+                <div className="p-8 text-center border-2 border-dashed border-slate-200 rounded-2xl">
+                  <p className="text-xs text-slate-400 font-medium">
+                    Tidak ada nota tempo dengan filter yang dipilih.
+                  </p>
+                </div>
+              ) : (
+                filteredTempoOrders.map((order) => {
+                  const now = Date.now();
+                  const remaining = order.remaining_balance ?? (order.total_omzet - (order.amount_paid || 0));
+                  const isPaid = remaining <= 0;
+                  const isOverdue = Boolean(order.due_date && new Date(order.due_date).getTime() < now && remaining > 0);
+                  const isPartial = (order.amount_paid || 0) > 0 && remaining > 0;
+
+                  return (
+                    <div 
+                      key={order.id}
+                      className={`p-4 sm:p-5 rounded-2xl border-2 transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 ${
+                        isOverdue 
+                          ? 'border-red-300 bg-red-50/40' 
+                          : isPaid 
+                          ? 'border-emerald-200 bg-emerald-50/20' 
+                          : 'border-slate-200 bg-slate-50/60'
+                      }`}
+                    >
+                      {/* Info Nota & Mitra */}
+                      <div className="space-y-1.5 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-mono font-black text-xs text-ink bg-white px-2.5 py-1 rounded-lg border border-slate-200">
+                            {order.order_number}
+                          </span>
+
+                          {/* Status Badge */}
+                          {isPaid ? (
+                            <span className="px-2.5 py-0.5 rounded-md bg-emerald-100 text-emerald-800 text-[11px] font-black flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                              <span>Lunas</span>
+                            </span>
+                          ) : isOverdue ? (
+                            <span className="px-2.5 py-0.5 rounded-md bg-red-100 text-red-800 text-[11px] font-black flex items-center gap-1">
+                              <AlertTriangle className="w-3 h-3 text-red-600" />
+                              <span>Lewat Jatuh Tempo</span>
+                            </span>
+                          ) : isPartial ? (
+                            <span className="px-2.5 py-0.5 rounded-md bg-amber-100 text-amber-800 text-[11px] font-black flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-amber-600" />
+                              <span>Sebagian</span>
+                            </span>
+                          ) : (
+                            <span className="px-2.5 py-0.5 rounded-md bg-slate-200 text-slate-800 text-[11px] font-black">
+                              Belum Lunas
+                            </span>
+                          )}
+
+                          {order.due_date && (
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              Jatuh Tempo: <strong>{new Date(order.due_date).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}</strong>
+                            </span>
+                          )}
+                        </div>
+
+                        <h6 className="font-display font-black text-base text-ink pt-0.5">
+                          {order.customer_name}
+                        </h6>
+
+                        <div className="text-xs text-slate-500 flex items-center gap-3">
+                          <span>📞 {order.customer_phone}</span>
+                          <span>&bull;</span>
+                          <span>{order.items.length} macam barang</span>
+                        </div>
+                      </div>
+
+                      {/* Rincian Angka & Tombol Aksi */}
+                      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 pt-3 md:pt-0 border-t md:border-t-0 border-slate-200">
+                        <div className="text-left sm:text-right">
+                          <span className="text-[10px] text-slate-400 font-bold block uppercase tracking-wider">
+                            Sisa Tagihan
+                          </span>
+                          <span className="font-mono font-black text-lg sm:text-xl text-amber-600 block">
+                            Rp {remaining.toLocaleString('id-ID')}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block">
+                            Total: Rp {order.total_omzet.toLocaleString('id-ID')} (Sudah bayar: Rp {(order.amount_paid || 0).toLocaleString('id-ID')})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 w-full sm:w-auto">
+                          {!isPaid && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSelectedTempoOrder(order);
+                                setIsPaymentTempoOpen(true);
+                              }}
+                              className="flex-1 sm:flex-none px-4 py-2.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl font-black text-xs transition-all shadow-sm flex items-center justify-center gap-1.5 active:scale-95"
+                            >
+                              <Banknote className="w-4 h-4" />
+                              <span>Catat Bayar</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleSendReminderWA(order)}
+                            className="p-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl transition-all shadow-sm"
+                            title="Kirim pengingat WhatsApp ke mitra"
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* SUB-TAB 4: STATUS STOK & PERINGATAN (RESTOCK)         */}
+      {/* ==================================================== */}
+      {activeSubTab === 'inventory' && (
+        <div className="space-y-8 animate-fadeIn">
+          {/* Header Bar */}
+          <div className="bg-white p-6 rounded-3xl neo-border shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h4 className="font-display font-black text-xl text-ink">
+                Status Stok Fisik & Peringatan Otomatis
+              </h4>
+              <p className="text-xs sm:text-sm text-slate-500 font-medium">
+                Stok terpotong otomatis saat nota kasir/WA selesai. Tambahkan kuota saat kiriman pabrik tiba.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setRestockProductVariant({});
+                setIsRestockOpen(true);
+              }}
+              className="py-3 px-5 bg-eco-dark hover:bg-eco text-white rounded-2xl font-black text-xs sm:text-sm neo-border flex items-center gap-2 transition-all active:scale-95 shadow-sm shrink-0"
+            >
+              <ArrowUpRight className="w-4 h-4" />
+              <span>+ Catat Barang Masuk (Restock)</span>
+            </button>
+          </div>
+
+          {/* 4 KPI Cards Stok */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
+            <div className="bg-white p-5 rounded-2xl neo-border shadow-sm">
+              <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider block">Total Varian</span>
+              <div className="font-display font-black text-2xl text-ink mt-1">
+                {stockSummary.totalVariants}
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium">Semua ukuran terdaftar</span>
+            </div>
+
+            <div className="bg-white p-5 rounded-2xl neo-border shadow-sm">
+              <span className="text-[11px] font-black text-emerald-600 uppercase tracking-wider block">Stok Aman</span>
+              <div className="font-display font-black text-2xl text-emerald-600 mt-1">
+                {stockSummary.safeCount}
+              </div>
+              <span className="text-[10px] text-emerald-600 font-medium">Kuantitas di atas batas</span>
+            </div>
+
+            <div className={`p-5 rounded-2xl neo-border shadow-sm ${stockSummary.lowCount > 0 ? 'bg-amber-50 border-amber-300' : 'bg-white'}`}>
+              <span className="text-[11px] font-black text-amber-700 uppercase tracking-wider block">Stok Menipis</span>
+              <div className="font-display font-black text-2xl text-amber-700 mt-1">
+                {stockSummary.lowCount}
+              </div>
+              <span className="text-[10px] text-amber-600 font-medium">Perlu segera di-restock</span>
+            </div>
+
+            <div className={`p-5 rounded-2xl neo-border shadow-sm ${stockSummary.emptyCount > 0 ? 'bg-red-50 border-red-300' : 'bg-white'}`}>
+              <span className="text-[11px] font-black text-red-600 uppercase tracking-wider block">Stok Habis (0)</span>
+              <div className="font-display font-black text-2xl text-red-600 mt-1">
+                {stockSummary.emptyCount}
+              </div>
+              <span className="text-[10px] text-red-500 font-medium">Barang kosong di toko</span>
+            </div>
+          </div>
+
+          {/* Tabel Status Stok Produk */}
+          <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-5">
+            {/* Search & Filter */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200">
+              <div className="relative flex-1 max-w-sm">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={stockSearch}
+                  onChange={(e) => setStockSearch(e.target.value)}
+                  placeholder="Cari nama produk / ukuran varian..."
+                  className="w-full h-10 pl-10 pr-4 text-xs font-bold text-ink bg-slate-50 border border-slate-200 rounded-xl focus:border-primary outline-none"
+                />
+              </div>
+
+              <div className="inline-flex p-1 bg-slate-100 rounded-xl border border-slate-200 text-xs font-bold">
+                <button
+                  type="button"
+                  onClick={() => setStockStatusFilter('all')}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    stockStatusFilter === 'all' ? 'bg-primary text-white shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  Semua ({stockSummary.totalVariants})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockStatusFilter('warning')}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    stockStatusFilter === 'warning' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  Peringatan Menipis ({stockSummary.lowCount + stockSummary.emptyCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStockStatusFilter('empty')}
+                  className={`px-3 py-1 rounded-lg transition-all ${
+                    stockStatusFilter === 'empty' ? 'bg-red-500 text-white shadow-sm' : 'text-slate-600'
+                  }`}
+                >
+                  Habis ({stockSummary.emptyCount})
+                </button>
+              </div>
+            </div>
+
+            {/* List Varian */}
+            <div className="space-y-3">
+              {filteredStockList.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center">Tidak ada produk yang cocok dengan pencarian.</p>
+              ) : (
+                filteredStockList.map((item, idx) => (
+                  <div 
+                    key={idx}
+                    className="p-4 bg-slate-50 hover:bg-slate-100/70 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition-colors"
+                  >
+                    <div className="flex items-center gap-3.5 min-w-0">
+                      <img 
+                        src={item.productImage} 
+                        alt={item.productName} 
+                        className="w-12 h-12 rounded-xl object-contain bg-white p-1 border border-slate-200 shrink-0"
+                      />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-black px-2 py-0.5 rounded bg-sky-100 text-primary">
+                            {item.productCategory}
+                          </span>
+                          <span className="font-extrabold text-sm text-ink truncate">
+                            {item.productName}
+                          </span>
+                        </div>
+                        <p className="text-slate-500 text-xs font-medium mt-0.5">
+                          Varian: <strong className="text-ink">{item.variantName}</strong> &bull; Batas Peringatan: {item.minAlert.toLocaleString('id-ID')} unit
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between sm:justify-end gap-4 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200">
+                      <div className="text-right">
+                        <span className="font-mono font-black text-base text-ink block">
+                          {item.stockQty.toLocaleString('id-ID')} <span className="text-xs text-slate-500 font-sans">unit</span>
+                        </span>
+
+                        {item.status === 'safe' ? (
+                          <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[10px] font-black inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            Stok Aman
+                          </span>
+                        ) : item.status === 'low' ? (
+                          <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-black inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500"></span>
+                            Stok Menipis
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded bg-red-100 text-red-800 text-[10px] font-black inline-flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-red-500"></span>
+                            Stok Habis
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRestockProductVariant({ productId: item.productId, variantId: item.variantId });
+                          setIsRestockOpen(true);
+                        }}
+                        className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs transition-all shadow-sm flex items-center gap-1 shrink-0 active:scale-95"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Restock</span>
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Riwayat Kartu Stok / Mutasi Keluar & Masuk */}
+          <div className="bg-white p-6 sm:p-7 rounded-3xl neo-border shadow-sm space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-200">
+              <div>
+                <h5 className="font-display font-black text-lg text-ink">
+                  Buku Kartu Stok (Audit Mutasi Barang)
+                </h5>
+                <p className="text-xs text-slate-500 font-medium">
+                  Setiap pemotongan kasir dan penambahan pabrik tercatat runut secara transparan
+                </p>
+              </div>
+              <span className="text-xs text-slate-400 font-bold">{stockMovements.length} log</span>
+            </div>
+
+            <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+              {stockMovements.length === 0 ? (
+                <p className="text-xs text-slate-400 py-6 text-center">Belum ada mutasi stok tercatat.</p>
+              ) : (
+                stockMovements.slice(0, 30).map((mov) => {
+                  const isIncoming = mov.type === 'in_restock';
+                  return (
+                    <div 
+                      key={mov.id}
+                      className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                            isIncoming ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {isIncoming ? 'MASUK (RESTOCK)' : 'KELUAR (PENJUALAN)'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            {new Date(mov.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                        <p className="font-bold text-ink mt-0.5">
+                          {mov.notes || (mov.order_number ? `Ref: ${mov.order_number}` : 'Mutasi stok')}
+                        </p>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className={`font-mono font-black text-sm block ${
+                          isIncoming ? 'text-emerald-600' : 'text-slate-800'
+                        }`}>
+                          {mov.qty_change > 0 ? `+${mov.qty_change}` : mov.qty_change} unit
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-medium block">
+                          Sisa: {mov.resulting_stock.toLocaleString('id-ID')}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================== */}
+      {/* MODAL POPUPS: RESTOCK, TEMPO PAYMENT, EXPENSE        */}
+      {/* ==================================================== */}
+      <RestockModal
+        isOpen={isRestockOpen}
+        onClose={() => setIsRestockOpen(false)}
+        defaultProductId={restockProductVariant.productId}
+        defaultVariantId={restockProductVariant.variantId}
+      />
+
+      <PaymentTempoModal
+        isOpen={isPaymentTempoOpen}
+        onClose={() => {
+          setIsPaymentTempoOpen(false);
+          setSelectedTempoOrder(null);
+        }}
+        order={selectedTempoOrder}
+      />
+
+      <AddExpenseModal
+        isOpen={isAddExpenseOpen}
+        onClose={() => setIsAddExpenseOpen(false)}
+      />
+
+      {/* MODAL KONFIRMASI HAPUS / BERSIH TOTAL */}
+      {isClearModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
+          <div 
+            className="bg-white max-w-md w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-7 space-y-5 animate-scaleUp text-left"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center border-2 border-red-300 shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-xl text-ink">
+                  Yakin Mau Hapus Semua?
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  Seluruh riwayat transaksi penjualan akan dihapus secara permanen.
+                </p>
+              </div>
+            </div>
+
+            <div className="p-3 bg-red-50 rounded-xl border border-red-200 text-xs text-red-800 space-y-1 font-medium">
+              <p>⚠️ <strong>Tindakan Permanen:</strong></p>
+              <p>Data omzet dan laba akan kembali menjadi Rp 0. Masukkan PIN pemilik untuk melanjutkan.</p>
+            </div>
+
+            {deleteError && (
+              <div className="p-3 bg-red-100 text-red-800 text-xs rounded-xl font-bold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-red-600" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <label className="block text-xs font-black text-ink">
+                Password / PIN Pemilik Toko
               </label>
               <input
                 type="password"
+                maxLength={10}
                 value={deletePassword}
                 onChange={(e) => {
                   setDeletePassword(e.target.value);
                   setDeleteError(null);
                 }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleConfirmDelete();
-                  }
-                }}
-                placeholder="Ketik password/PIN pemilik..."
-                className="w-full px-4 py-3 rounded-xl border-2 border-slate-300 focus:border-red-500 focus:ring-2 focus:ring-red-100 outline-none text-sm font-black tracking-widest text-ink bg-white"
+                placeholder="Masukkan PIN Anda"
+                className="w-full h-11 px-3.5 font-mono text-center text-lg font-black tracking-widest text-ink bg-white border-2 border-slate-300 rounded-xl focus:border-red-500 outline-none"
                 autoFocus
               />
-              {deleteError && (
-                <div className="p-2.5 bg-red-100 rounded-lg border border-red-300 text-xs text-red-700 font-bold flex items-center gap-1.5">
-                  <AlertTriangle className="w-4 h-4 shrink-0 text-red-600" />
-                  <span>{deleteError}</span>
-                </div>
-              )}
-              <div className="flex items-center justify-between text-[11px] text-slate-500 font-medium">
-                <span>* PIN pemilik toko ({isPinChanged ? 'PIN kustom Anda' : 'Default: 1234'})</span>
-                {!isPinChanged && (
-                  <button
-                    type="button"
-                    onClick={() => setDeletePassword('1234')}
-                    className="text-primary hover:underline font-bold text-[11px]"
-                  >
-                    (Klik: Isi PIN 1234)
-                  </button>
-                )}
-              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="flex gap-3 pt-2">
               <button
                 type="button"
                 onClick={() => {
+                  setIsClearModalOpen(false);
                   setDeletePassword('');
                   setDeleteError(null);
-                  setIsClearModalOpen(false);
                 }}
-                className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs sm:text-sm border border-slate-300 transition-all"
+                className="flex-1 h-11 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs rounded-xl transition-all"
               >
-                Batal / Simpan Data
+                Batal
               </button>
-
               <button
                 type="button"
                 onClick={handleConfirmDelete}
-                className="py-3 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-xs sm:text-sm neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-1.5"
+                className="flex-1 h-11 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-[0.99]"
               >
-                <Trash2 className="w-4 h-4" />
-                <span>Ya, Bersihkan Total!</span>
+                Ya, Hapus Semua Data
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* MODAL KONFIRMASI: MUAT ULANG CONTOH DATA SIMULASI */}
+      {/* MODAL RESET DEMO ORDERS */}
       {isResetDemoModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
           <div 
-            className="bg-white max-w-md w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-8 space-y-5 animate-scaleUp"
+            className="bg-white max-w-md w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-7 space-y-5 animate-scaleUp text-left"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="w-16 h-16 rounded-2xl bg-sky-100 text-primary flex items-center justify-center mx-auto border-2 border-sky-300">
-              <RotateCcw className="w-9 h-9" />
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-primary/10 text-primary flex items-center justify-center border-2 border-primary/30 shrink-0">
+                <RotateCcw className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="font-display font-black text-xl text-ink">
+                  Muat Contoh Transaksi Demo?
+                </h3>
+                <p className="text-xs text-slate-500 font-medium">
+                  Sistem akan mengisi riwayat transaksi realistis toko plastik.
+                </p>
+              </div>
             </div>
 
-            <div className="text-center space-y-2">
-              <h3 className="font-display font-black text-2xl text-ink tracking-tight text-primary">
-                Muat Data Contoh Simulasi?
-              </h3>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed font-medium">
-                Sistem akan mengisi kembali 10 data transaksi contoh (Warung Geprek, Kopi Janji Manis, dll.) selama 30 hari terakhir agar grafik dan analisis dapat diuji coba.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 pt-2">
+            <div className="flex gap-3 pt-2">
               <button
                 type="button"
                 onClick={() => setIsResetDemoModalOpen(false)}
-                className="py-3 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-black text-xs sm:text-sm border border-slate-300 transition-all"
+                className="flex-1 h-11 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-xs rounded-xl transition-all"
               >
                 Batal
               </button>
-
               <button
                 type="button"
                 onClick={() => {
                   resetToDemoOrders();
                   setIsResetDemoModalOpen(false);
-                  setActionNotice('Data contoh simulasi 30 hari berhasil dimuat!');
+                  setActionNotice('✨ Contoh transaksi penjualan toko plastik berhasil dimuat!');
                   setTimeout(() => setActionNotice(null), 5000);
                 }}
-                className="py-3 px-4 bg-primary hover:bg-primary-dark text-white rounded-xl font-black text-xs sm:text-sm neo-border transition-all active:translate-x-0.5 active:translate-y-0.5 flex items-center justify-center gap-1.5"
+                className="flex-1 h-11 bg-primary hover:bg-primary-dark text-white font-black text-xs rounded-xl shadow-md transition-all active:scale-[0.99]"
               >
-                <Check className="w-4 h-4" />
-                <span>Muat Data Contoh</span>
+                Muat Data Demo
               </button>
             </div>
           </div>

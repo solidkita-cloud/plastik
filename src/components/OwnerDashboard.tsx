@@ -37,6 +37,7 @@ import { useSettingsStore, cleanPhoneNumber } from '../stores/settingsStore';
 import { useCustomerStore } from '../stores/customerStore';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
+import { RestockModal } from './RestockModal';
 
 interface OwnerDashboardProps {
   isOpen: boolean;
@@ -52,6 +53,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [pin, setPin] = useState('');
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activeTab, setActiveTab] = useState<'analytics' | 'settings' | 'inventory' | 'customers' | 'verify' | 'agents'>('analytics');
+  const [isRestockOpen, setIsRestockOpen] = useState(false);
+  const [restockProductId, setRestockProductId] = useState<string | undefined>(undefined);
 
   // Stores
   const products = useCatalogStore((state) => state.products);
@@ -961,6 +964,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                     <div className="flex items-center gap-3">
                       <button
+                        onClick={() => {
+                          setRestockProductId(undefined);
+                          setIsRestockOpen(true);
+                        }}
+                        className="py-3 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm neo-border flex items-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5"
+                      >
+                        <Plus className="w-5 h-5" />
+                        <span>+ Restock Masuk</span>
+                      </button>
+
+                      <button
                         onClick={onOpenAddProduct}
                         className="py-3 px-6 bg-eco hover:bg-eco-dark text-white rounded-2xl font-black text-sm neo-border-thick neo-shadow flex items-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5"
                       >
@@ -984,7 +998,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                   {/* Products Grid */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-                    {products.map((p) => (
+                    {products.map((p) => {
+                      const totalStock = p.variants?.reduce((sum, v) => sum + (v.stock_qty ?? 0), 0) ?? 0;
+                      const hasLowStock = p.variants?.some((v) => (v.stock_qty ?? 0) <= (v.min_stock_alert ?? 200));
+
+                      return (
                       <div 
                         key={p.id}
                         className="p-5 bg-white rounded-2xl neo-border shadow-sm flex flex-col justify-between space-y-4"
@@ -1005,11 +1023,36 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             <span className="text-xs font-black text-accent block mt-0.5">
                               Rp {(p.variants?.[0]?.units?.[0]?.price ?? 0).toLocaleString('id-ID')} / {p.variants?.[0]?.units?.[0]?.unit_code || 'Pcs'}
                             </span>
+                            <div className="mt-1.5 flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-black inline-flex items-center gap-1 ${
+                                totalStock <= 0 
+                                  ? 'bg-red-100 text-red-700' 
+                                  : hasLowStock 
+                                  ? 'bg-amber-100 text-amber-800' 
+                                  : 'bg-emerald-100 text-emerald-800'
+                              }`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${
+                                  totalStock <= 0 ? 'bg-red-500' : hasLowStock ? 'bg-amber-500' : 'bg-emerald-500'
+                                }`}></span>
+                                <span>Stok: {totalStock.toLocaleString('id-ID')} unit</span>
+                              </span>
+                            </div>
                           </div>
                         </div>
 
                         <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
-                          <span className="text-slate-400">ID: {p.id}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setRestockProductId(p.id);
+                              setIsRestockOpen(true);
+                            }}
+                            className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-lg flex items-center gap-1 transition-colors"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Restock</span>
+                          </button>
+
                           <button
                             onClick={() => {
                               const expectedPin = storeSettings.ownerPin || '1234';
@@ -1031,7 +1074,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           </button>
                         </div>
                       </div>
-                    ))}
+                    );
+                  })}
                   </div>
                 </div>
               )}
@@ -1256,6 +1300,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           cashierName="Admin Kasir (Uji Coba)"
         />
       )}
+
+      {/* Restock Modal */}
+      <RestockModal
+        isOpen={isRestockOpen}
+        onClose={() => {
+          setIsRestockOpen(false);
+          setRestockProductId(undefined);
+        }}
+        defaultProductId={restockProductId}
+      />
     </div>
   );
 };

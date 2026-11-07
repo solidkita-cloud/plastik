@@ -12,13 +12,15 @@ import { useSettingsStore, StoreSettings } from '../stores/settingsStore';
 import { useCatalogStore } from '../stores/catalogStore';
 import { useCustomerStore } from '../stores/customerStore';
 import { useSalesStore } from '../stores/salesStore';
-import { Product, CustomerProfile, SalesOrder } from '../types';
+import { useExpenseStore } from '../stores/expenseStore';
+import { Product, CustomerProfile, SalesOrder, ExpenseRecord } from '../types';
 
 let isListening = false;
 let unsubscribeSettings: (() => void) | null = null;
 let unsubscribeProducts: (() => void) | null = null;
 let unsubscribeCustomers: (() => void) | null = null;
 let unsubscribeOrders: (() => void) | null = null;
+let unsubscribeExpenses: (() => void) | null = null;
 
 /**
  * Memulai sinkronisasi realtime dari Firebase Firestore ke local store.
@@ -103,6 +105,19 @@ export function startFirebaseRealtimeSync(onStatusChange?: (status: {
       console.warn('Firebase Orders snapshot error:', error);
     });
 
+    // 5. Listen ke Pengeluaran Kas (Expenses)
+    const expensesRef = collection(db, 'expenses');
+    unsubscribeExpenses = onSnapshot(expensesRef, (snapshot) => {
+      const cloudExpenses: ExpenseRecord[] = [];
+      snapshot.forEach((docSnap) => {
+        cloudExpenses.push(docSnap.data() as ExpenseRecord);
+      });
+      useExpenseStore.setState({ expenses: cloudExpenses });
+      localStorage.setItem('plastipro_expenses_v1', JSON.stringify(cloudExpenses));
+    }, (error) => {
+      console.warn('Firebase Expenses snapshot error:', error);
+    });
+
     onStatusChange?.({
       connected: true,
       message: 'Sinkronisasi Realtime Aktif',
@@ -125,6 +140,7 @@ export function stopFirebaseRealtimeSync() {
   if (unsubscribeProducts) unsubscribeProducts();
   if (unsubscribeCustomers) unsubscribeCustomers();
   if (unsubscribeOrders) unsubscribeOrders();
+  if (unsubscribeExpenses) unsubscribeExpenses();
   isListening = false;
 }
 
@@ -237,18 +253,68 @@ export async function clearAllOrdersFromFirebase(): Promise<boolean> {
 }
 
 /**
- * Upload seluruh data lokal saat ini (Pengaturan, Katalog, Mitra, Penjualan) ke Cloud Firebase sekaligus
+ * Simpan satu pengeluaran operasional ke Firebase
+ */
+export async function saveExpenseToFirebase(expense: ExpenseRecord): Promise<boolean> {
+  try {
+    const expRef = doc(db, 'expenses', expense.id);
+    await setDoc(expRef, JSON.parse(JSON.stringify(expense)));
+    return true;
+  } catch (error) {
+    console.error('Gagal menyimpan expense ke Firebase:', error);
+    return false;
+  }
+}
+
+/**
+ * Hapus pengeluaran operasional dari Firebase
+ */
+export async function deleteExpenseFromFirebase(id: string): Promise<boolean> {
+  try {
+    const expRef = doc(db, 'expenses', id);
+    await deleteDoc(expRef);
+    return true;
+  } catch (error) {
+    console.error('Gagal menghapus expense dari Firebase:', error);
+    return false;
+  }
+}
+
+/**
+ * Hapus seluruh pengeluaran operasional dari Firebase (Bersihkan Kas)
+ */
+export async function clearAllExpensesFromFirebase(): Promise<boolean> {
+  try {
+    const expensesRef = collection(db, 'expenses');
+    const snapshot = await getDocs(expensesRef);
+    if (!snapshot.empty) {
+      const batch = writeBatch(db);
+      snapshot.forEach((docSnap) => {
+        batch.delete(docSnap.ref);
+      });
+      await batch.commit();
+    }
+    return true;
+  } catch (error) {
+    console.warn('Gagal menghapus expenses dari Firebase:', error);
+    return false;
+  }
+}
+
+/**
+ * Upload seluruh data lokal saat ini (Pengaturan, Katalog, Mitra, Penjualan, Biaya) ke Cloud Firebase sekaligus
  */
 export async function uploadAllLocalDataToFirebase(): Promise<{
   success: boolean;
   message: string;
-  counts: { products: number; customers: number; orders: number };
+  counts: { products: number; customers: number; orders: number; expenses: number };
 }> {
   try {
     const currentSettings = useSettingsStore.getState();
     const currentProducts = useCatalogStore.getState().products;
     const currentCustomers = useCustomerStore.getState().customers;
     const currentOrders = useSalesStore.getState().orders;
+    const currentExpenses = useExpenseStore.getState().expenses;
 
     // 1. Upload settings
     const settingsRef = doc(db, 'settings', 'general');
@@ -289,15 +355,22 @@ export async function uploadAllLocalDataToFirebase(): Promise<{
       batch.set(ordRef, JSON.parse(JSON.stringify(ord)));
     });
 
+    // 5. Upload expenses
+    currentExpenses.slice(0, 50).forEach((exp) => {
+      const expRef = doc(db, 'expenses', exp.id);
+      batch.set(expRef, JSON.parse(JSON.stringify(exp)));
+    });
+
     await batch.commit();
 
     return {
       success: true,
-      message: 'Berhasil mengunggah seluruh data toko, produk, mitra, dan riwayat penjualan ke Cloud Firebase!',
+      message: 'Berhasil mengunggah seluruh data toko, produk, mitra, penjualan, dan biaya kas ke Cloud Firebase!',
       counts: {
         products: currentProducts.length,
         customers: currentCustomers.length,
-        orders: currentOrders.length
+        orders: currentOrders.length,
+        expenses: currentExpenses.length
       }
     };
   } catch (error: any) {
@@ -305,7 +378,7 @@ export async function uploadAllLocalDataToFirebase(): Promise<{
     return {
       success: false,
       message: error?.message || 'Gagal mengunggah data ke Cloud Firebase.',
-      counts: { products: 0, customers: 0, orders: 0 }
+      counts: { products: 0, customers: 0, orders: 0, expenses: 0 }
     };
   }
 }
