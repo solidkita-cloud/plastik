@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { DEFAULT_AUTH_HASHES, hashPassword } from '../lib/security';
 
 export interface StoreSettings {
   storeName: string;
@@ -13,13 +14,20 @@ export interface StoreSettings {
   email: string;
   logoUrl: string | null;
   thermalFooterNote: string;
-  ownerPin?: string;
+  ownerPin?: string; // Legacy plaintext fallback only for seamless migration
+  ownerPinHash?: string;
+  cashierPinHash?: string;
   isPinChanged?: boolean;
+  isCashierPinChanged?: boolean;
+  printerPaperWidth?: '58mm' | '80mm';
+  autoPrintBluetooth?: boolean;
 }
 
 interface SettingsState extends StoreSettings {
   updateSettings: (newSettings: Partial<StoreSettings>) => void;
-  updateOwnerPin: (newPin: string) => void;
+  updateOwnerPin: (newPin: string) => Promise<void>;
+  updateCashierPin: (newPin: string) => Promise<void>;
+  migrateOwnerPinToHash: (plainPin: string) => Promise<void>;
   resetToDefault: () => void;
 }
 
@@ -38,12 +46,22 @@ export const DEFAULT_SETTINGS: StoreSettings = {
   email: 'halo@plastipro.co.id',
   logoUrl: null,
   thermalFooterNote: 'Barang yang sudah dibeli dapat ditukar jika ada cacat pabrik maksimal 2 hari.',
-  ownerPin: '1234',
-  isPinChanged: false
+  ownerPinHash: DEFAULT_AUTH_HASHES.ownerHash,
+  cashierPinHash: DEFAULT_AUTH_HASHES.cashierHash,
+  isPinChanged: false,
+  isCashierPinChanged: false,
+  printerPaperWidth: '58mm',
+  autoPrintBluetooth: false
 };
 
+export function sanitizeSettingsForCloud(settings: Partial<StoreSettings>): Partial<StoreSettings> {
+  const clean = JSON.parse(JSON.stringify(settings)) as Record<string, unknown>;
+  delete clean.ownerPin;
+  return clean as Partial<StoreSettings>;
+}
+
 export function cleanPhoneNumber(raw?: string | null): { international: string; display: string } {
-  const safe = typeof raw === 'string' ? raw : (raw ? String(raw) : '');
+  const safe = typeof raw === 'string' ? raw : raw ? String(raw) : '';
   let cleaned = safe.replace(/\D/g, '');
   if (cleaned.startsWith('0')) {
     cleaned = '62' + cleaned.substring(1);
@@ -52,8 +70,7 @@ export function cleanPhoneNumber(raw?: string | null): { international: string; 
   }
   if (!cleaned) cleaned = '6281234567890';
 
-  // Format display 08xx-xxxx-xxxx
-  let localNumber = cleaned.startsWith('62') ? '0' + cleaned.substring(2) : cleaned;
+  const localNumber = cleaned.startsWith('62') ? '0' + cleaned.substring(2) : cleaned;
   let display = localNumber;
   if (localNumber.length >= 10) {
     display = `${localNumber.substring(0, 4)}-${localNumber.substring(4, 8)}-${localNumber.substring(8)}`;
@@ -66,8 +83,14 @@ function loadInitialSettings(): StoreSettings {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved) {
-      const parsed = JSON.parse(saved);
-      return { ...DEFAULT_SETTINGS, ...parsed };
+      const parsed = JSON.parse(saved) as Partial<StoreSettings>;
+      return {
+        ...DEFAULT_SETTINGS,
+        ...parsed,
+        // Keep hash defaults if not present yet (e.g., older config)
+        ownerPinHash: parsed.ownerPinHash || (parsed.ownerPin && parsed.isPinChanged ? undefined : DEFAULT_AUTH_HASHES.ownerHash),
+        cashierPinHash: parsed.cashierPinHash || DEFAULT_AUTH_HASHES.cashierHash
+      };
     }
   } catch (err) {
     console.warn('Gagal membaca store settings dari localStorage:', err);
@@ -83,7 +106,7 @@ function saveSettings(settings: StoreSettings) {
   }
 }
 
-export const useSettingsStore = create<SettingsState>((set) => {
+export const useSettingsStore = create<SettingsState>((set, get) => {
   const initial = loadInitialSettings();
 
   return {
@@ -112,13 +135,43 @@ export const useSettingsStore = create<SettingsState>((set) => {
       });
     },
 
-    updateOwnerPin: (newPin: string) => {
+    updateOwnerPin: async (newPin: string) => {
+      const hashed = await hashPassword(newPin);
       set((state) => {
         const updated: StoreSettings = {
           ...state,
-          ownerPin: newPin,
+          ownerPinHash: hashed,
           isPinChanged: true
         };
+        delete updated.ownerPin;
+        saveSettings(updated);
+        return updated;
+      });
+    },
+
+    updateCashierPin: async (newPin: string) => {
+      const hashed = await hashPassword(newPin);
+      set((state) => {
+        const updated: StoreSettings = {
+          ...state,
+          cashierPinHash: hashed,
+          isCashierPinChanged: true
+        };
+        saveSettings(updated);
+        return updated;
+      });
+    },
+
+    migrateOwnerPinToHash: async (plainPin: string) => {
+      const state = get();
+      if (state.ownerPinHash) return;
+      const hashed = await hashPassword(plainPin);
+      set((cur) => {
+        const updated: StoreSettings = {
+          ...cur,
+          ownerPinHash: hashed
+        };
+        delete updated.ownerPin;
         saveSettings(updated);
         return updated;
       });

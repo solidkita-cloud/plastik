@@ -1,8 +1,15 @@
-import React from 'react';
-import { X, Printer, Download, CheckCircle2 } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Printer, Download, CheckCircle2, Bluetooth } from 'lucide-react';
 import { CartItem } from '../types';
 import { useSettingsStore } from '../stores/settingsStore';
 import { generateThermalReceiptPDF } from '../lib/thermalPrinter';
+import {
+  printPlastikReceiptViaBluetooth,
+  formatBluetoothErrorAlert,
+  isBluetoothSupported
+} from '../lib/bluetoothPrinter';
+import { BluetoothPrinterBar } from './BluetoothPrinterBar';
+import { useSalesStore } from '../stores/salesStore';
 
 interface ThermalReceiptModalProps {
   isOpen: boolean;
@@ -17,6 +24,8 @@ interface ThermalReceiptModalProps {
   totalWeightKg: number;
   verificationCode: string;
   cashierName?: string;
+  paymentMethod?: 'cash' | 'transfer' | 'tempo';
+  dueDate?: string;
 }
 
 export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
@@ -31,9 +40,14 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   subtotal,
   totalWeightKg,
   verificationCode,
-  cashierName = 'Kasir Toko'
+  cashierName = 'Kasir Toko',
+  paymentMethod = 'cash',
+  dueDate
 }) => {
   const storeSettings = useSettingsStore();
+  const incrementPrintCount = useSalesStore((s) => s.incrementPrintCount);
+  const [btStatusMsg, setBtStatusMsg] = useState<string | null>(null);
+  const [isPrintingBt, setIsPrintingBt] = useState(false);
 
   if (!isOpen) return null;
 
@@ -46,6 +60,40 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   });
 
   const totalItemCount = items.reduce((acc, curr) => acc + curr.qty, 0);
+
+  const handleBluetoothPrint = async () => {
+    setIsPrintingBt(true);
+    try {
+      const res = await printPlastikReceiptViaBluetooth(
+        {
+          orderNumber,
+          customerName,
+          deliveryMethodName,
+          items,
+          subtotal,
+          totalWeightKg,
+          verificationCode,
+          cashierName,
+          dateStr: nowFormatted,
+          paymentMethod,
+          paymentStatus: paymentMethod === 'tempo' ? 'unpaid' : 'paid',
+          dueDate
+        },
+        storeSettings
+      );
+      incrementPrintCount(orderNumber);
+      setBtStatusMsg(`✅ Struk terkirim ke printer Bluetooth "${res.deviceName}"!`);
+    } catch (err: any) {
+      const info = formatBluetoothErrorAlert(err);
+      if (info.isCancelled) {
+        setBtStatusMsg('Pemilihan printer dibatalkan.');
+      } else {
+        alert(info.message);
+      }
+    } finally {
+      setIsPrintingBt(false);
+    }
+  };
 
   const handleDirectPrint = () => {
     window.print();
@@ -152,6 +200,20 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                 <span>Kirim:</span>
                 <span>{deliveryMethodName}</span>
               </div>
+              <div className="flex justify-between">
+                <span>Bayar:</span>
+                <span className="font-bold">
+                  {paymentMethod === 'tempo' ? 'TEMPO (PIUTANG)' : paymentMethod === 'transfer' ? 'TRANSFER' : 'TUNAI (LUNAS)'}
+                </span>
+              </div>
+              {paymentMethod === 'tempo' && dueDate && (
+                <div className="flex justify-between">
+                  <span>Jatuh Tempo:</span>
+                  <span className="font-bold">
+                    {new Date(dueDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+                  </span>
+                </div>
+              )}
             </div>
 
             {/* Items Table */}
@@ -212,45 +274,62 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
           </div>
 
           {/* Action Panel & Instructions (Spacious & Clean) */}
-          <div className="flex-1 space-y-5 text-ink">
-            <div className="bg-white p-5 rounded-2xl neo-border shadow-sm space-y-3">
+          <div className="flex-1 space-y-4 text-ink">
+            <BluetoothPrinterBar
+              compact
+              onNotice={(m) => setBtStatusMsg(m)}
+            />
+
+            {btStatusMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold">
+                {btStatusMsg}
+              </div>
+            )}
+
+            <div className="bg-white p-5 rounded-2xl neo-border shadow-sm space-y-2.5">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-100 text-eco-dark font-extrabold text-xs">
                 <CheckCircle2 className="w-4 h-4 text-eco" />
-                <span>Format Standar POS 58mm Siap Cetak</span>
+                <span>Format POS ({storeSettings.printerPaperWidth || '58mm'}) Siap Cetak</span>
               </span>
               <h4 className="font-display font-black text-base sm:text-lg">
                 Cetak Cepat ke Printer Kasir Toko
               </h4>
-              <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                Struk ini dirancang khusus dengan lebar **58mm**, hemat kertas gulung thermal, dan otomatis pas di semua printer thermal Bluetooth mini kasir tanpa terpotong.
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Cetak langsung via <strong>Bluetooth (ESC/POS)</strong> dari Chrome Android/Desktop, cetak lewat browser, atau unduh file PDF 58mm.
               </p>
             </div>
 
             {/* Action Buttons */}
-            <div className="space-y-3">
+            <div className="space-y-2.5">
+              {isBluetoothSupported() && (
+                <button
+                  type="button"
+                  disabled={isPrintingBt}
+                  onClick={handleBluetoothPrint}
+                  className="w-full py-3.5 px-5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-sm sm:text-base neo-border-thick neo-shadow transition-all flex items-center justify-center gap-2.5 active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50"
+                >
+                  <Bluetooth className="w-5 h-5" />
+                  <span>{isPrintingBt ? 'Mengirim ke Printer...' : '🖨️ Cetak Langsung Bluetooth (ESC/POS)'}</span>
+                </button>
+              )}
+
               <button
+                type="button"
                 onClick={handleDirectPrint}
-                className="w-full py-4 px-6 bg-primary hover:bg-primary-dark text-white rounded-2xl font-black text-sm sm:text-base neo-border-thick neo-shadow transition-all flex items-center justify-center gap-2.5 active:translate-x-0.5 active:translate-y-0.5"
+                className="w-full py-3.5 px-5 bg-primary hover:bg-primary-dark text-white rounded-2xl font-black text-sm neo-border neo-shadow transition-all flex items-center justify-center gap-2 active:translate-x-0.5 active:translate-y-0.5"
               >
-                <Printer className="w-5 h-5" />
-                <span>Cetak Sekarang ke Printer (58mm)</span>
+                <Printer className="w-4 h-4" />
+                <span>Cetak Biasa / Browser Print</span>
               </button>
 
               <button
+                type="button"
                 onClick={handleDownloadPDF}
-                className="w-full py-3.5 px-6 bg-white hover:bg-slate-100 text-slate-800 rounded-2xl font-bold text-sm neo-border transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 px-5 bg-white hover:bg-slate-100 text-slate-800 rounded-2xl font-bold text-xs sm:text-sm neo-border transition-all flex items-center justify-center gap-2"
               >
                 <Download className="w-4 h-4 text-slate-600" />
                 <span>Unduh File Struk 58mm (.pdf)</span>
               </button>
-            </div>
-
-            {/* Printer Compatibility Note */}
-            <div className="p-4 bg-sky-50 rounded-2xl border border-sky-200 text-xs text-sky-950 space-y-1">
-              <div className="font-extrabold text-primary">💡 Panduan Cetak Printer Bluetooth:</div>
-              <p className="text-[11px] text-slate-600 leading-relaxed">
-                Jika mencetak dari HP Android via Bluetooth, Anda juga bisa mengunduh file PDF 58mm di atas lalu buka via aplikasi printer seperti **RawBT** atau **Bluetooth Print**.
-              </p>
             </div>
           </div>
 

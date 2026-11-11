@@ -1,23 +1,28 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { X, Package, Plus, ArrowUpRight, Check } from 'lucide-react';
 import { useCatalogStore } from '../stores/catalogStore';
-import { saveProductToFirebase } from '../services/firebaseSync';
+import { useExpenseStore } from '../stores/expenseStore';
+import { saveProductToFirebase, saveExpenseToFirebase } from '../services/firebaseSync';
+import { logSecurityEvent } from '../lib/security';
 
 interface RestockModalProps {
   isOpen: boolean;
   onClose: () => void;
   defaultProductId?: string;
   defaultVariantId?: string;
+  canManageHpp?: boolean;
 }
 
 export const RestockModal: React.FC<RestockModalProps> = ({
   isOpen,
   onClose,
   defaultProductId,
-  defaultVariantId
+  defaultVariantId,
+  canManageHpp = true
 }) => {
   const products = useCatalogStore((state) => state.products);
   const restockVariant = useCatalogStore((state) => state.restockVariant);
+  const addExpense = useExpenseStore((state) => state.addExpense);
 
   const [selectedProductId, setSelectedProductId] = useState<string>(
     defaultProductId || products[0]?.id || ''
@@ -27,24 +32,74 @@ export const RestockModal: React.FC<RestockModalProps> = ({
   const [selectedVariantId, setSelectedVariantId] = useState<string>(
     defaultVariantId || selectedProduct?.variants?.[0]?.id || ''
   );
-  const selectedVariant = selectedProduct?.variants?.find((v) => v.id === selectedVariantId) || selectedProduct?.variants?.[0];
+  const selectedVariant =
+    selectedProduct?.variants?.find((v) => v.id === selectedVariantId) ||
+    selectedProduct?.variants?.[0];
 
   const [addedQty, setAddedQty] = useState<number | string>(500);
+  const [unitCostRp, setUnitCostRp] = useState<number | string>('');
+  const [updateUnitCogs, setUpdateUnitCogs] = useState<boolean>(true);
+  const [recordAsExpense, setRecordAsExpense] = useState<boolean>(false);
   const [notes, setNotes] = useState<string>('Restock / Pengiriman dari Pabrik');
   const [successToast, setSuccessToast] = useState(false);
+
+  // Sinkronkan produk & varian default setiap kali modal dibuka
+  useEffect(() => {
+    if (!isOpen) return;
+    const prod = products.find((p) => p.id === defaultProductId) || products[0];
+    if (prod) {
+      setSelectedProductId(prod.id);
+      const variant = prod.variants?.find((v) => v.id === defaultVariantId) || prod.variants?.[0];
+      if (variant) {
+        setSelectedVariantId(variant.id);
+        // Estimasi harga beli per 1 unit dasar dari HPP unit pertama jika tersedia
+        const u = variant.units?.[0];
+        if (u && u.cogs_price && u.base_multiplier > 0) {
+          setUnitCostRp(Math.round(u.cogs_price / u.base_multiplier));
+        } else {
+          setUnitCostRp('');
+        }
+      }
+    }
+    setSuccessToast(false);
+  }, [isOpen, defaultProductId, defaultVariantId, products]);
 
   if (!isOpen) return null;
 
   const currentStock = selectedVariant?.stock_qty ?? 0;
+  const qtyNum = Number(addedQty) || 0;
+  const unitCostNum = Number(unitCostRp) || 0;
+  const estimatedPurchaseTotal = qtyNum > 0 && unitCostNum > 0 ? Math.round(qtyNum * unitCostNum) : 0;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const qty = Number(addedQty);
-    if (!qty || qty <= 0 || !selectedProduct || !selectedVariant) return;
+    if (!qtyNum || qtyNum <= 0 || !selectedProduct || !selectedVariant) return;
 
-    restockVariant(selectedProduct.id, selectedVariant.id, qty, notes.trim());
+    const validCost = canManageHpp && unitCostNum > 0 ? unitCostNum : undefined;
 
-    // Sync updated product to Firebase
+    restockVariant(selectedProduct.id, selectedVariant.id, qtyNum, notes.trim(), {
+      unitCostRp: validCost,
+      updateUnitCogs: Boolean(canManageHpp && validCost && updateUnitCogs)
+    });
+
+    if (canManageHpp && validCost && updateUnitCogs) {
+      logSecurityEvent(
+        'HPP_UPDATED',
+        `Restock ${selectedProduct.name} (${selectedVariant.name}) +${qtyNum} pcs & update HPP @Rp ${validCost.toLocaleString('id-ID')}/pcs`,
+        'INFO'
+      );
+    }
+
+    if (canManageHpp && recordAsExpense && estimatedPurchaseTotal > 0) {
+      const exp = addExpense({
+        category: 'pembelian_stok',
+        title: `Kulakan Stok: ${selectedProduct.name} (${selectedVariant.name})`,
+        amount: estimatedPurchaseTotal,
+        notes: `${qtyNum.toLocaleString('id-ID')} pcs x Rp ${unitCostNum.toLocaleString('id-ID')} | ${notes.trim()}`
+      });
+      saveExpenseToFirebase(exp).catch((err) => console.warn('Sync expense error:', err));
+    }
+
     const updatedProd = useCatalogStore.getState().products.find((p) => p.id === selectedProduct.id);
     if (updatedProd) {
       saveProductToFirebase(updatedProd).catch((err) => console.warn('Sync restock to Firebase error:', err));
@@ -60,7 +115,7 @@ export const RestockModal: React.FC<RestockModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm animate-fadeIn">
       <div 
-        className="bg-white max-w-lg w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-8 space-y-6 animate-scaleUp text-left relative"
+        className="bg-white max-w-lg w-full rounded-3xl neo-border-thick shadow-hard-lg p-6 sm:p-8 space-y-5 animate-scaleUp text-left relative max-h-[92vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
         <button
@@ -79,7 +134,7 @@ export const RestockModal: React.FC<RestockModalProps> = ({
               Catat Stok Masuk (Restock)
             </h3>
             <p className="text-xs text-slate-500 font-medium">
-              Tambahkan kuota stok fisik barang yang baru datang dari pabrik / supplier.
+              Tambahkan stok fisik barang datang{canManageHpp ? ' sekaligus perbarui harga kulakan (HPP Beli)' : ''}.
             </p>
           </div>
         </div>
@@ -107,10 +162,15 @@ export const RestockModal: React.FC<RestockModalProps> = ({
                   setSelectedProductId(e.target.value);
                   const prod = products.find((p) => p.id === e.target.value);
                   if (prod && prod.variants.length > 0) {
-                    setSelectedVariantId(prod.variants[0].id);
+                    const firstVar = prod.variants[0];
+                    setSelectedVariantId(firstVar.id);
+                    const u = firstVar.units?.[0];
+                    if (u?.cogs_price && u.base_multiplier > 0) {
+                      setUnitCostRp(Math.round(u.cogs_price / u.base_multiplier));
+                    }
                   }
                 }}
-                className="w-full h-12 px-4 rounded-xl border-2 border-slate-300 font-bold text-sm text-ink focus:border-primary outline-none bg-white"
+                className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-300 font-bold text-sm text-ink focus:border-primary outline-none bg-white"
               >
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -120,7 +180,7 @@ export const RestockModal: React.FC<RestockModalProps> = ({
               </select>
             </div>
 
-            {/* Pilih Varian & Ukuran */}
+            {/* Pilih Varian */}
             {selectedProduct && selectedProduct.variants.length > 0 && (
               <div>
                 <label className="block text-xs font-black uppercase text-slate-700 mb-1.5">
@@ -128,12 +188,19 @@ export const RestockModal: React.FC<RestockModalProps> = ({
                 </label>
                 <select
                   value={selectedVariantId}
-                  onChange={(e) => setSelectedVariantId(e.target.value)}
-                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-300 font-bold text-sm text-ink focus:border-primary outline-none bg-white"
+                  onChange={(e) => {
+                    setSelectedVariantId(e.target.value);
+                    const vr = selectedProduct.variants.find((v) => v.id === e.target.value);
+                    const u = vr?.units?.[0];
+                    if (u?.cogs_price && u.base_multiplier > 0) {
+                      setUnitCostRp(Math.round(u.cogs_price / u.base_multiplier));
+                    }
+                  }}
+                  className="w-full h-11 px-3.5 rounded-xl border-2 border-slate-300 font-bold text-sm text-ink focus:border-primary outline-none bg-white"
                 >
                   {selectedProduct.variants.map((v) => (
                     <option key={v.id} value={v.id}>
-                      {v.name} (Stok Saat Ini: {v.stock_qty ?? 0} pcs)
+                      {v.name} (Stok: {(v.stock_qty ?? 0).toLocaleString('id-ID')} pcs)
                     </option>
                   ))}
                 </select>
@@ -156,19 +223,17 @@ export const RestockModal: React.FC<RestockModalProps> = ({
               <label className="block text-xs font-black uppercase text-slate-700 mb-1.5">
                 Jumlah Barang Masuk (Satuan Dasar / Pcs):
               </label>
-              <div className="relative">
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={addedQty}
-                  onChange={(e) => setAddedQty(e.target.value)}
-                  placeholder="Contoh: 500"
-                  className="w-full h-12 px-4 rounded-xl border-2 border-slate-300 font-black text-base text-ink focus:border-primary outline-none bg-white"
-                  required
-                />
-              </div>
-              <div className="flex gap-2 mt-2">
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={addedQty}
+                onChange={(e) => setAddedQty(e.target.value)}
+                placeholder="Contoh: 500"
+                className="w-full h-11 px-4 rounded-xl border-2 border-slate-300 font-black text-base text-ink focus:border-primary outline-none bg-white"
+                required
+              />
+              <div className="flex flex-wrap gap-2 mt-2">
                 {[100, 250, 500, 1000, 2500].map((preset) => (
                   <button
                     key={preset}
@@ -182,6 +247,59 @@ export const RestockModal: React.FC<RestockModalProps> = ({
               </div>
             </div>
 
+            {/* Harga Beli / Kulakan (Khusus Pemilik) */}
+            {canManageHpp && (
+              <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 space-y-3">
+                <div>
+                  <label className="block text-xs font-black uppercase text-emerald-900 mb-1">
+                    Harga Beli Kulakan per 1 Unit Dasar / Pcs (Opsional):
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono font-bold text-xs text-emerald-700">
+                      Rp
+                    </span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={unitCostRp}
+                      onChange={(e) => setUnitCostRp(e.target.value)}
+                      placeholder="Kosongkan jika HPP tidak berubah"
+                      className="w-full h-10 pl-10 pr-3 rounded-xl border border-emerald-300 font-mono font-bold text-sm text-ink bg-white focus:border-emerald-500 outline-none"
+                    />
+                  </div>
+                  {estimatedPurchaseTotal > 0 && (
+                    <span className="block text-[11px] font-bold text-emerald-800 mt-1">
+                      Total Nilai Nota Pabrik: <strong>Rp {estimatedPurchaseTotal.toLocaleString('id-ID')}</strong>
+                    </span>
+                  )}
+                </div>
+
+                {unitCostNum > 0 && (
+                  <div className="space-y-1.5 text-xs">
+                    <label className="flex items-center gap-2 font-bold text-emerald-900 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={updateUnitCogs}
+                        onChange={(e) => setUpdateUnitCogs(e.target.checked)}
+                        className="rounded text-emerald-600 focus:ring-emerald-500"
+                      />
+                      <span>Perbarui HPP Beli di katalog produk sesuai harga kulakan baru</span>
+                    </label>
+
+                    <label className="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={recordAsExpense}
+                        onChange={(e) => setRecordAsExpense(e.target.checked)}
+                        className="rounded text-rose-600 focus:ring-rose-500"
+                      />
+                      <span>Catat sekalian ke Buku Kas sebagai pengeluaran belanja stok</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Keterangan Supplier / Asal Restock */}
             <div>
               <label className="block text-xs font-black uppercase text-slate-700 mb-1.5">
@@ -192,7 +310,7 @@ export const RestockModal: React.FC<RestockModalProps> = ({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="Cth: Pengiriman Supplier Krian / Bongkar Truk Bal"
-                className="w-full h-12 px-4 rounded-xl border-2 border-slate-300 font-medium text-xs sm:text-sm text-ink focus:border-primary outline-none bg-white"
+                className="w-full h-11 px-4 rounded-xl border-2 border-slate-300 font-medium text-xs sm:text-sm text-ink focus:border-primary outline-none bg-white"
               />
             </div>
 

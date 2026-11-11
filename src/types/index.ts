@@ -101,6 +101,7 @@ export interface OrderItemRecord {
   variant_name: string;
   unit_code: string;
   unit_name: string;
+  base_multiplier?: number;
   qty: number;
   sell_price: number;
   cogs_price: number; // Modal / HPP
@@ -132,6 +133,12 @@ export interface SalesOrder {
   profit_margin_pct: number;
   status: 'completed' | 'pending' | 'cancelled';
   source: 'whatsapp_checkout' | 'pos_thermal' | 'qr_reorder';
+  // Void & Reprint Tracking
+  void_reason?: string;
+  voided_at?: string;
+  voided_by?: 'owner' | 'cashier';
+  print_count?: number;
+  last_printed_at?: string;
   // Payment & Tempo Details
   payment_method?: 'cash' | 'transfer' | 'tempo';
   payment_status?: 'paid' | 'unpaid' | 'partial';
@@ -149,9 +156,11 @@ export interface StockMovement {
   product_name: string;
   variant_id: string;
   variant_name: string;
-  type: 'in_restock' | 'out_sale' | 'adjustment';
+  type: 'in_restock' | 'out_sale' | 'in_void_return' | 'adjustment';
   qty_change: number; // e.g. +1000 atau -50 pcs
   unit_name?: string;
+  unit_cost_rp?: number; // Harga beli kulakan per unit dasar saat restock
+  total_cost_rp?: number; // Total nominal belanja kulakan masuk
   resulting_stock: number;
   notes: string;
   order_number?: string;
@@ -167,6 +176,31 @@ export interface ExpenseRecord {
   category_name: string;
   title: string;
   amount: number;
+  notes?: string;
+}
+
+// Tutup Kasir Harian & Rekonsiliasi Laci Tunai
+export interface CashierClosingRecap {
+  id: string;
+  recapDate: string; // YYYY-MM-DD
+  closedAt: string; // ISO string
+  cashierName: string;
+  totalOrders: number;
+  totalItemsSold: number;
+  cashSalesRevenue: number;
+  transferSalesRevenue: number;
+  tempoSalesRevenue: number;
+  tempoCashCollected: number;
+  tempoTransferCollected: number;
+  totalCashInDrawerSales: number; // Penjualan tunai + pelunasan tempo tunai
+  totalExpenses: number;
+  totalGrossProfit?: number;
+  totalNetProfit?: number;
+  openingCashFloat: number;
+  expectedDrawerCash: number;
+  actualDrawerCash: number;
+  cashDifference: number;
+  depositToOwner: number;
   notes?: string;
 }
 

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { CartItem, CustomerProfile } from '../types';
 import { generateIdempotencyKey, validateCartItem } from '../lib/security';
+import { useCatalogStore, resolveUnitCogsPrice } from './catalogStore';
 
 interface CartState {
   items: CartItem[];
@@ -58,9 +59,18 @@ export const useCartStore = create<CartState>((set, get) => ({
       qty: newItem.qty
     });
 
+    const products = useCatalogStore.getState().products;
+    const resolvedCogs = resolveUnitCogsPrice(
+      products,
+      newItem.variant_id,
+      newItem.unit_id,
+      newItem.price,
+      newItem.cogs_price
+    );
+
     const itemWithCogs: CartItem = {
       ...newItem,
-      cogs_price: newItem.cogs_price ?? Math.round(newItem.price * 0.72)
+      cogs_price: resolvedCogs
     };
 
     set((state) => {

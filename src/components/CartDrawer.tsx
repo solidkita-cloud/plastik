@@ -24,6 +24,7 @@ import { useCatalogStore } from '../stores/catalogStore';
 import { saveOrderToFirebase } from '../services/firebaseSync';
 import { sanitizeNote, generateVerificationChecksum } from '../lib/security';
 import { generateInvoicePDF } from '../lib/pdfGenerator';
+import { tryAutoPrintPlastikReceipt } from '../lib/bluetoothPrinter';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
 
 interface CartDrawerProps {
@@ -161,6 +162,7 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       const dueDateIso = isTempo ? new Date(Date.now() + tempoDays * 24 * 60 * 60 * 1000).toISOString() : undefined;
       try {
         const recordedOrder = recordCheckoutOrder({
+          orderNumber,
           items,
           customerName,
           customerPhone,
@@ -202,20 +204,24 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       kargo: 'Ekspedisi Kargo Bal'
     };
 
+    const isTempo = paymentMethod === 'tempo';
+    const dueDateIso = isTempo ? new Date(Date.now() + tempoDays * 24 * 60 * 60 * 1000).toISOString() : undefined;
+    const finalCustomerName = customer?.business_name || guestName || 'Pelanggan Toko Fisik';
+    const finalDeliveryName = deliveryLabels[deliveryMethod] || 'Ambil di Toko Fisik';
+
     setThermalReceiptData({
       orderNumber,
-      customerName: customer?.business_name || guestName || 'Pelanggan Umum',
+      customerName: finalCustomerName,
       customerPhone: customer?.phone_number || guestPhone || '-',
       customerAddress: customer?.delivery_address || guestAddress || '-',
-      deliveryMethodName: deliveryLabels[deliveryMethod] || 'Kurir Toko',
+      deliveryMethodName: finalDeliveryName,
       items,
       subtotal,
       totalWeightKg,
-      verificationCode: code
+      verificationCode: code,
+      paymentMethod,
+      dueDate: dueDateIso
     });
-
-    const isTempo = paymentMethod === 'tempo';
-    const dueDateIso = isTempo ? new Date(Date.now() + tempoDays * 24 * 60 * 60 * 1000).toISOString() : undefined;
 
     // 1. Potong Stok Real-Time
     useCatalogStore.getState().deductStock(items, orderNumber);
@@ -223,11 +229,12 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
     // 2. Record POS Thermal receipt order
     try {
       const recordedOrder = recordCheckoutOrder({
+        orderNumber,
         items,
-        customerName: customer?.business_name || guestName || 'Pelanggan Toko Fisik',
+        customerName: finalCustomerName,
         customerPhone: customer?.phone_number || guestPhone || '-',
         customerId: customer?.id,
-        deliveryMethod: deliveryLabels[deliveryMethod] || 'Ambil di Toko Fisik',
+        deliveryMethod: finalDeliveryName,
         source: 'pos_thermal',
         paymentMethod,
         dueDate: dueDateIso
@@ -235,6 +242,24 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
       saveOrderToFirebase(recordedOrder).catch((e) => console.warn('Sync thermal order error:', e));
     } catch (recErr) {
       console.warn('Gagal record thermal order:', recErr);
+    }
+
+    // 3. Auto-print Bluetooth ESC/POS jika diaktifkan dan transaksi lunas
+    if (storeSettings.autoPrintBluetooth && !isTempo) {
+      tryAutoPrintPlastikReceipt(
+        {
+          orderNumber,
+          customerName: finalCustomerName,
+          deliveryMethodName: finalDeliveryName,
+          items,
+          subtotal,
+          totalWeightKg,
+          verificationCode: code,
+          paymentMethod,
+          paymentStatus: 'paid'
+        },
+        storeSettings
+      ).catch(() => {});
     }
 
     setIsThermalOpen(true);
@@ -690,6 +715,8 @@ export const CartDrawer: React.FC<CartDrawerProps> = ({ isOpen, onClose, onOpenQ
           subtotal={thermalReceiptData.subtotal}
           totalWeightKg={thermalReceiptData.totalWeightKg}
           verificationCode={thermalReceiptData.verificationCode}
+          paymentMethod={thermalReceiptData.paymentMethod}
+          dueDate={thermalReceiptData.dueDate}
         />
       )}
     </div>

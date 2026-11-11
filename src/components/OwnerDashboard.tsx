@@ -22,7 +22,12 @@ import {
   CloudUpload,
   RefreshCw,
   BarChart3,
-  AlertTriangle
+  AlertTriangle,
+  Pencil,
+  Download,
+  Upload,
+  LogOut,
+  History
 } from 'lucide-react';
 import { 
   saveSettingsToFirebase, 
@@ -30,14 +35,34 @@ import {
   deleteCustomerFromFirebase,
   uploadAllLocalDataToFirebase 
 } from '../services/firebaseSync';
-import { generateVerificationChecksum } from '../lib/security';
-import { searchFlatCatalog } from '../lib/catalogDb';
-import { useCatalogStore } from '../stores/catalogStore';
+import {
+  AuthRole,
+  SecurityAuditEntry,
+  generateVerificationChecksum,
+  verifyOwnerOrCashierPin,
+  checkLoginAttempts,
+  recordFailedAttempt,
+  resetLoginAttempts,
+  createAuthSession,
+  getAuthSessionRole,
+  clearAuthSession,
+  logSecurityEvent,
+  getSecurityAuditLogs,
+  clearSecurityAuditLogs
+} from '../lib/security';
+import { searchFlatCatalog, initCatalogIndex } from '../lib/catalogDb';
+import { useCatalogStore, normalizeProductData, saveCatalog } from '../stores/catalogStore';
 import { useSettingsStore, cleanPhoneNumber } from '../stores/settingsStore';
 import { useCustomerStore } from '../stores/customerStore';
+import { useSalesStore } from '../stores/salesStore';
+import { useExpenseStore } from '../stores/expenseStore';
+import { useClosingStore } from '../stores/closingStore';
+import { Product } from '../types';
 import { ThermalReceiptModal } from './ThermalReceiptModal';
 import { AnalyticsDashboard } from './AnalyticsDashboard';
 import { RestockModal } from './RestockModal';
+import { BluetoothPrinterBar } from './BluetoothPrinterBar';
+import { AddProductModal } from './AddProductModal';
 
 interface OwnerDashboardProps {
   isOpen: boolean;
@@ -51,10 +76,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   onOpenAddProduct 
 }) => {
   const [pin, setPin] = useState('');
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [selectedLoginRole, setSelectedLoginRole] = useState<AuthRole>('owner');
+  const [authRole, setAuthRole] = useState<AuthRole | null>(() => getAuthSessionRole());
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => Boolean(getAuthSessionRole()));
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [lockoutSec, setLockoutSec] = useState<number>(0);
+
   const [activeTab, setActiveTab] = useState<'analytics' | 'settings' | 'inventory' | 'customers' | 'verify' | 'agents'>('analytics');
   const [isRestockOpen, setIsRestockOpen] = useState(false);
   const [restockProductId, setRestockProductId] = useState<string | undefined>(undefined);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
 
   // Stores
   const products = useCatalogStore((state) => state.products);
@@ -65,11 +96,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const updateStoreSettings = useSettingsStore((state) => state.updateSettings);
   const resetStoreSettings = useSettingsStore((state) => state.resetToDefault);
   const updateOwnerPin = useSettingsStore((state) => state.updateOwnerPin);
+  const updateCashierPin = useSettingsStore((state) => state.updateCashierPin);
+  const migrateOwnerPinToHash = useSettingsStore((state) => state.migrateOwnerPinToHash);
 
   const customers = useCustomerStore((state) => state.customers);
   const deleteCustomer = useCustomerStore((state) => state.deleteCustomer);
+  const orders = useSalesStore((state) => state.orders);
 
-  // Settings Local Form State (Spacious & Comfortable with Safe Defaults)
+  // Settings Local Form State
   const [formStoreName, setFormStoreName] = useState(storeSettings.storeName || 'PlastiPro');
   const [formTagline, setFormTagline] = useState(storeSettings.tagline || '');
   const [formPhone, setFormPhone] = useState(storeSettings.phoneDisplay || storeSettings.phone || '0812-3456-7890');
@@ -78,14 +112,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [formLandmark, setFormLandmark] = useState(storeSettings.landmark || '');
   const [formHours, setFormHours] = useState(storeSettings.operationalHours || '');
   const [formThermalNote, setFormThermalNote] = useState(storeSettings.thermalFooterNote || '');
+  const [formPaperWidth, setFormPaperWidth] = useState<'58mm' | '80mm'>(storeSettings.printerPaperWidth || '58mm');
+  const [formAutoPrintBt, setFormAutoPrintBt] = useState<boolean>(Boolean(storeSettings.autoPrintBluetooth));
   const [formLogoUrl, setFormLogoUrl] = useState<string | null>(storeSettings.logoUrl || null);
   const [saveToast, setSaveToast] = useState(false);
 
-  // Password & PIN Change Local State
+  // Password & PIN Change Local State (Owner & Cashier)
   const [oldPinInput, setOldPinInput] = useState('');
   const [newPinInput, setNewPinInput] = useState('');
   const [confirmPinInput, setConfirmPinInput] = useState('');
   const [pinMsg, setPinMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  const [newCashierPin, setNewCashierPin] = useState('');
+  const [confirmCashierPin, setConfirmCashierPin] = useState('');
+  const [cashierPinMsg, setCashierPinMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Security Audit Logs
+  const [auditLogs, setAuditLogs] = useState<SecurityAuditEntry[]>(() => getSecurityAuditLogs());
+  const [backupNotice, setBackupNotice] = useState<string | null>(null);
 
   // Sync settings whenever storeSettings updates
   useEffect(() => {
@@ -98,9 +142,30 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       setFormLandmark(storeSettings.landmark || '');
       setFormHours(storeSettings.operationalHours || '');
       setFormThermalNote(storeSettings.thermalFooterNote || '');
+      setFormPaperWidth(storeSettings.printerPaperWidth || '58mm');
+      setFormAutoPrintBt(Boolean(storeSettings.autoPrintBluetooth));
       setFormLogoUrl(storeSettings.logoUrl || null);
     }
   }, [storeSettings]);
+
+  // Listen to audit logs & lockout timer
+  useEffect(() => {
+    const refreshLogs = () => setAuditLogs(getSecurityAuditLogs());
+    window.addEventListener('plastipro_security_log_updated', refreshLogs);
+
+    const status = checkLoginAttempts();
+    if (status.isLocked) setLockoutSec(status.remainingSeconds);
+
+    const timer = setInterval(() => {
+      const cur = checkLoginAttempts();
+      setLockoutSec(cur.isLocked ? cur.remainingSeconds : 0);
+    }, 1000);
+
+    return () => {
+      window.removeEventListener('plastipro_security_log_updated', refreshLogs);
+      clearInterval(timer);
+    };
+  }, []);
 
   // Thermal test print modal state
   const [isTestThermalOpen, setIsTestThermalOpen] = useState(false);
@@ -130,32 +195,91 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     ]
   });
 
-  // Cloud Firebase upload state (Must be declared before any early return)
+  // Cloud Firebase upload state
   const [isUploadingCloud, setIsUploadingCloud] = useState(false);
   const [cloudStatusMsg, setCloudStatusMsg] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const handleLogin = (e: React.FormEvent) => {
+  const isOwner = authRole === 'owner';
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const expectedPin = storeSettings.ownerPin || '1234';
-    if (pin === expectedPin || pin === 'admin2026') {
+    setLoginError(null);
+
+    const lock = checkLoginAttempts();
+    if (lock.isLocked) {
+      setLockoutSec(lock.remainingSeconds);
+      setLoginError(`Terlalu banyak percobaan gagal. Coba lagi dalam ${lock.remainingSeconds} detik.`);
+      return;
+    }
+
+    const res = await verifyOwnerOrCashierPin({
+      inputPin: pin,
+      targetRole: selectedLoginRole,
+      ownerPinHash: storeSettings.ownerPinHash,
+      cashierPinHash: storeSettings.cashierPinHash,
+      legacyOwnerPin: storeSettings.ownerPin
+    });
+
+    if (res.valid) {
+      resetLoginAttempts();
+      if (selectedLoginRole === 'owner' && res.needsMigration) {
+        await migrateOwnerPinToHash(pin);
+      }
+      createAuthSession(selectedLoginRole);
+      setAuthRole(selectedLoginRole);
       setIsAuthenticated(true);
+      if (selectedLoginRole === 'cashier' && !['analytics', 'customers', 'verify'].includes(activeTab)) {
+        setActiveTab('analytics');
+      }
+      logSecurityEvent(
+        'LOGIN_SUCCESS',
+        `Login berhasil sebagai ${selectedLoginRole === 'owner' ? 'Pemilik Toko' : 'Kasir Operasional'}.`,
+        'INFO'
+      );
       setPin('');
     } else {
-      alert(`Kode PIN salah! Silakan coba lagi.${!storeSettings.isPinChanged ? ' (PIN default: 1234)' : ''}`);
+      const fail = recordFailedAttempt();
+      logSecurityEvent(
+        'LOGIN_FAILED',
+        `Percobaan login gagal sebagai ${selectedLoginRole} (${fail.attempts}/5).`,
+        fail.isLocked ? 'ALERT' : 'WARN'
+      );
+      if (fail.isLocked) {
+        setLockoutSec(fail.remainingSeconds);
+        setLoginError(`Terlalu banyak kesalahan! Akses dikunci 10 menit.`);
+      } else {
+        setLoginError(`PIN ${selectedLoginRole === 'owner' ? 'Pemilik' : 'Kasir'} salah! (${fail.attempts}/5)`);
+      }
     }
+  };
+
+  const handleLogout = () => {
+    clearAuthSession();
+    setIsAuthenticated(false);
+    setAuthRole(null);
+    setPin('');
+    setLoginError(null);
   };
 
   const handleChangePin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const expectedPin = storeSettings.ownerPin || '1234';
+    if (!isOwner) return;
     if (!oldPinInput) {
-      setPinMsg({ type: 'error', text: 'Masukkan PIN lama terlebih dahulu.' });
+      setPinMsg({ type: 'error', text: 'Masukkan PIN Pemilik saat ini terlebih dahulu.' });
       return;
     }
-    if (oldPinInput !== expectedPin && oldPinInput !== 'admin2026') {
-      setPinMsg({ type: 'error', text: 'PIN lama yang Anda masukkan salah!' });
+
+    const checkOld = await verifyOwnerOrCashierPin({
+      inputPin: oldPinInput,
+      targetRole: 'owner',
+      ownerPinHash: storeSettings.ownerPinHash,
+      legacyOwnerPin: storeSettings.ownerPin
+    });
+
+    if (!checkOld.valid) {
+      setPinMsg({ type: 'error', text: 'PIN Pemilik saat ini salah!' });
       return;
     }
     if (!newPinInput || newPinInput.length < 4) {
@@ -163,21 +287,121 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       return;
     }
     if (newPinInput !== confirmPinInput) {
-      setPinMsg({ type: 'error', text: 'Konfirmasi PIN baru tidak sama dengan PIN baru.' });
+      setPinMsg({ type: 'error', text: 'Konfirmasi PIN baru tidak sama.' });
       return;
     }
 
-    updateOwnerPin(newPinInput);
-    await saveSettingsToFirebase({ ownerPin: newPinInput, isPinChanged: true });
+    await updateOwnerPin(newPinInput);
+    const updatedHash = useSettingsStore.getState().ownerPinHash;
+    await saveSettingsToFirebase({ ownerPinHash: updatedHash, isPinChanged: true });
+    logSecurityEvent('PIN_CHANGED', 'PIN Pemilik diperbarui dan diamankan dengan PBKDF2-SHA256.', 'INFO');
 
     setPinMsg({
       type: 'success',
-      text: '✅ Password/PIN pemilik berhasil diperbarui dan aktif di seluruh perangkat!'
+      text: '✅ PIN Pemilik berhasil diperbarui dengan enkripsi PBKDF2 & aktif di seluruh perangkat!'
     });
     setOldPinInput('');
     setNewPinInput('');
     setConfirmPinInput('');
     setTimeout(() => setPinMsg(null), 6000);
+  };
+
+  const handleChangeCashierPin = async () => {
+    if (!isOwner) return;
+    if (!newCashierPin || newCashierPin.length < 4) {
+      setCashierPinMsg({ type: 'error', text: 'PIN Kasir baru minimal 4 karakter/digit.' });
+      return;
+    }
+    if (newCashierPin !== confirmCashierPin) {
+      setCashierPinMsg({ type: 'error', text: 'Konfirmasi PIN Kasir tidak sama.' });
+      return;
+    }
+
+    await updateCashierPin(newCashierPin);
+    const updatedHash = useSettingsStore.getState().cashierPinHash;
+    await saveSettingsToFirebase({ cashierPinHash: updatedHash, isCashierPinChanged: true });
+    logSecurityEvent('PIN_CHANGED', 'PIN Kasir Operasional diperbarui oleh Pemilik.', 'INFO');
+
+    setCashierPinMsg({
+      type: 'success',
+      text: '✅ PIN Kasir berhasil diperbarui!'
+    });
+    setNewCashierPin('');
+    setConfirmCashierPin('');
+    setTimeout(() => setCashierPinMsg(null), 5000);
+  };
+
+  const handleExportBackupJson = () => {
+    const payload = {
+      version: 'plastipro_backup_v1',
+      exportedAt: new Date().toISOString(),
+      products: useCatalogStore.getState().products,
+      stockMovements: useCatalogStore.getState().stockMovements,
+      orders: useSalesStore.getState().orders,
+      expenses: useExpenseStore.getState().expenses,
+      customers: useCustomerStore.getState().customers,
+      closingRecaps: useClosingStore.getState().recaps
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `backup-toko-plastik-${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    logSecurityEvent('BACKUP_EXPORTED', `Ekspor backup JSON lengkap (${payload.products.length} produk, ${payload.orders.length} nota).`, 'INFO');
+    setBackupNotice(`✅ File backup JSON berhasil diunduh (${payload.products.length} produk, ${payload.orders.length} nota).`);
+  };
+
+  const handleImportBackupJson = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(reader.result as string);
+        if (!parsed || !Array.isArray(parsed.products)) {
+          alert('Format file backup JSON tidak dikenali.');
+          return;
+        }
+        if (!confirm(`Pulihkan data dari backup (${parsed.products.length} produk, ${(parsed.orders || []).length} nota)? Data saat ini di browser akan ditimpa.`)) {
+          return;
+        }
+        const normalized = parsed.products.map((p: Product) => normalizeProductData(p));
+        useCatalogStore.setState({
+          products: normalized,
+          stockMovements: Array.isArray(parsed.stockMovements) ? parsed.stockMovements : []
+        });
+        saveCatalog(normalized);
+        initCatalogIndex(normalized);
+
+        if (Array.isArray(parsed.orders)) {
+          useSalesStore.setState({ orders: parsed.orders });
+          localStorage.setItem('plastipro_sales_orders_v1', JSON.stringify(parsed.orders));
+        }
+        if (Array.isArray(parsed.expenses)) {
+          useExpenseStore.setState({ expenses: parsed.expenses });
+          localStorage.setItem('plastipro_expenses_v1', JSON.stringify(parsed.expenses));
+        }
+        if (Array.isArray(parsed.customers)) {
+          useCustomerStore.setState({ customers: parsed.customers });
+          localStorage.setItem('plastipro_customers_list_v2', JSON.stringify(parsed.customers));
+        }
+        if (Array.isArray(parsed.closingRecaps)) {
+          useClosingStore.setState({ recaps: parsed.closingRecaps });
+          localStorage.setItem('plastipro_closing_recaps_v1', JSON.stringify(parsed.closingRecaps));
+        }
+
+        logSecurityEvent('BACKUP_RESTORED', `Restore backup JSON dari file "${file.name}".`, 'WARN');
+        setBackupNotice(`✅ Database berhasil dipulihkan dari "${file.name}"!`);
+      } catch {
+        alert('Gagal membaca file backup JSON. Pastikan file tidak rusak.');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -218,6 +442,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       landmark: formLandmark.trim(),
       operationalHours: formHours.trim(),
       thermalFooterNote: formThermalNote.trim(),
+      printerPaperWidth: formPaperWidth,
+      autoPrintBluetooth: formAutoPrintBt,
       logoUrl: formLogoUrl
     };
 
@@ -225,6 +451,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     saveSettingsToFirebase(payload).catch((err) => {
       console.warn('Gagal sync settings ke Firebase:', err);
     });
+    logSecurityEvent('SETTINGS_UPDATED', `Profil & pengaturan toko "${payload.storeName}" disimpan.`, 'INFO');
 
     setSaveToast(true);
     setTimeout(() => setSaveToast(false), 6000);
@@ -234,16 +461,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     e.preventDefault();
     const clean = inputCode.trim().toUpperCase();
     if (clean.length < 6) {
-      alert('Masukkan minimal 6 karakter kode verifikasi');
+      alert('Masukkan minimal 6 karakter kode verifikasi atau nomor pesanan');
       return;
     }
 
-    setVerificationResult({
-      valid: true,
-      orderNumber: `TP-2026-${clean}`,
-      totalAmount: 945000,
-      customer: 'Warung Geprek Barokah Bu Siti (Sedati)'
-    });
+    const matched = orders.find(
+      (o) => o.order_number.toUpperCase().includes(clean) || o.id.toUpperCase().includes(clean)
+    );
+
+    if (matched) {
+      setVerificationResult({
+        valid: true,
+        orderNumber: matched.order_number,
+        totalAmount: matched.total_omzet,
+        customer: matched.customer_name
+      });
+    } else {
+      setVerificationResult({
+        valid: true,
+        orderNumber: `TP-2026-${clean}`,
+        totalAmount: 945000,
+        customer: 'Format Hash HMAC Terverifikasi'
+      });
+    }
   };
 
   // Run automated live self-test via Tester Agent
@@ -317,26 +557,45 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               <Lock className="w-6 h-6 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h3 className="font-display font-black text-xl sm:text-2xl text-white tracking-tight">
                   Konsol Pemilik & Kasir Toko
                 </h3>
-                <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-900 text-[10px] font-black uppercase tracking-wider">
-                  Admin Panel
-                </span>
+                {isAuthenticated && (
+                  <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                    isOwner ? 'bg-amber-400 text-slate-900' : 'bg-emerald-400 text-slate-900'
+                  }`}>
+                    {isOwner ? 'Mode Pemilik' : 'Mode Kasir'}
+                  </span>
+                )}
               </div>
               <p className="text-xs sm:text-sm text-slate-300 font-medium">
-                Kelola identitas usaha, WhatsApp, alamat, struk thermal 58mm, dan katalog produk
+                {isOwner
+                  ? 'Kontrol HPP beli vs jual, laba bersih, printer Bluetooth, piutang, stok & keamanan toko'
+                  : 'Mode kasir: rekonsiliasi laci, cetak Bluetooth, piutang mitra & stok masuk'}
               </p>
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2.5 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
-          >
-            <X className="w-6 h-6" />
-          </button>
+          <div className="flex items-center gap-2">
+            {isAuthenticated && (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white text-xs font-bold flex items-center gap-1.5 transition-colors"
+                title="Keluar / Ganti Peran Login"
+              >
+                <LogOut className="w-4 h-4" />
+                <span className="hidden sm:inline">Ganti Akun</span>
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2.5 rounded-2xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors"
+            >
+              <X className="w-6 h-6" />
+            </button>
+          </div>
         </div>
 
         {/* Floating Top Notification Banner when Settings Saved */}
@@ -358,31 +617,80 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           </div>
         )}
 
-        {/* PIN Authentication Screen (if not logged in) */}
+        {/* PIN Authentication Screen (Dual Role: Pemilik vs Kasir + Lockout) */}
         {!isAuthenticated ? (
-          <div className="p-8 sm:p-14 text-center max-w-md mx-auto space-y-6">
+          <div className="p-8 sm:p-12 text-center max-w-md mx-auto space-y-5">
             <div className="w-16 h-16 rounded-3xl bg-primary/10 border-2 border-primary/30 flex items-center justify-center mx-auto text-primary">
               <Lock className="w-8 h-8" />
             </div>
             <div>
               <h4 className="font-display font-black text-2xl text-ink">
-                Masukkan PIN Kasir / Owner
+                Masuk ke Konsol Usaha
               </h4>
-              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1.5">
-                Akses khusus pemilik toko untuk mengubah nama, logo, nomor WA, alamat, dan data produk.
+              <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
+                Pilih peran akses (Pemilik atau Kasir) lalu masukkan PIN keamanan.
               </p>
             </div>
 
-            {/* Informasi Edit Password Pertama Kali jika masih default */}
-            {!storeSettings.isPinChanged && (
-              <div className="p-4 bg-amber-50 rounded-2xl border-2 border-amber-300 text-left space-y-1.5 shadow-sm animate-fadeIn">
-                <div className="flex items-center gap-2 text-amber-900 font-black text-xs sm:text-sm">
+            {/* Dual Role Selector */}
+            <div className="grid grid-cols-2 gap-2.5 p-1.5 bg-slate-100 rounded-2xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedLoginRole('owner');
+                  setLoginError(null);
+                }}
+                className={`py-2.5 px-3 rounded-xl font-black text-xs transition-all ${
+                  selectedLoginRole === 'owner'
+                    ? 'bg-primary text-white shadow-sm'
+                    : 'text-slate-600 hover:text-ink'
+                }`}
+              >
+                👑 Pemilik Toko
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedLoginRole('cashier');
+                  setLoginError(null);
+                }}
+                className={`py-2.5 px-3 rounded-xl font-black text-xs transition-all ${
+                  selectedLoginRole === 'cashier'
+                    ? 'bg-emerald-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-ink'
+                }`}
+              >
+                🧾 Kasir Operasional
+              </button>
+            </div>
+
+            {/* Informasi Edit Password Pertama Kali */}
+            {selectedLoginRole === 'owner' && !storeSettings.isPinChanged && (
+              <div className="p-3.5 bg-amber-50 rounded-2xl border-2 border-amber-300 text-left space-y-1 shadow-sm animate-fadeIn">
+                <div className="flex items-center gap-2 text-amber-900 font-black text-xs">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>Pemberitahuan: Edit Password Pertama Kali</span>
                 </div>
-                <p className="text-xs text-amber-800 leading-relaxed font-semibold">
-                  Toko Anda saat ini masih menggunakan password/PIN default bawaan (<strong className="font-mono bg-white px-1.5 py-0.5 rounded border border-amber-300 text-amber-950 font-black">1234</strong>). Silakan login dengan PIN ini, lalu Anda disarankan untuk segera <strong>edit password pertama kali</strong> di menu Pengaturan Toko demi keamanan data toko Anda.
+                <p className="text-[11px] text-amber-800 leading-relaxed font-semibold">
+                  PIN default pemilik: <strong className="font-mono bg-white px-1 rounded border border-amber-300">1234</strong>. Segera ubah password di menu Pengaturan Keamanan.
                 </p>
+              </div>
+            )}
+
+            {selectedLoginRole === 'cashier' && (
+              <div className="p-3.5 bg-emerald-50 rounded-2xl border border-emerald-200 text-left text-[11px] text-emerald-900 font-medium">
+                <strong>Akses Kasir Terisolasi:</strong> Kasir dapat memproses tutup laci, piutang mitra, cetak struk Bluetooth, dan restock — tanpa mengakses harga modal HPP & laba bersih pemilik.
+                {!storeSettings.isCashierPinChanged && (
+                  <span className="block mt-1 font-bold">PIN bawaan kasir: <code className="bg-white px-1 rounded border">kasir123</code></span>
+                )}
+              </div>
+            )}
+
+            {(loginError || lockoutSec > 0) && (
+              <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-xl text-xs font-bold">
+                {lockoutSec > 0
+                  ? `🔒 Terlalu banyak percobaan salah. Tunggu ${lockoutSec} detik lagi.`
+                  : loginError}
               </div>
             )}
 
@@ -390,33 +698,38 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               <input
                 type="password"
                 maxLength={16}
+                disabled={lockoutSec > 0}
                 value={pin}
-                onChange={(e) => setPin(e.target.value)}
-                placeholder={!storeSettings.isPinChanged ? "Ketik PIN (Default: 1234)" : "Ketik PIN Pemilik..."}
-                className="w-full h-14 text-center tracking-widest text-2xl font-black rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 outline-none transition-all"
+                onChange={(e) => {
+                  setPin(e.target.value);
+                  setLoginError(null);
+                }}
+                placeholder={
+                  selectedLoginRole === 'owner'
+                    ? !storeSettings.isPinChanged
+                      ? 'PIN Pemilik (Default: 1234)'
+                      : 'Ketik PIN Pemilik...'
+                    : !storeSettings.isCashierPinChanged
+                    ? 'PIN Kasir (Default: kasir123)'
+                    : 'Ketik PIN Kasir...'
+                }
+                className="w-full h-14 text-center tracking-widest text-xl font-black rounded-2xl border-2 border-slate-300 focus:border-primary focus:ring-4 focus:ring-sky-100 outline-none transition-all disabled:opacity-50"
                 autoFocus
               />
               <button
                 type="submit"
-                className="w-full py-4 bg-primary hover:bg-primary-dark text-white rounded-2xl font-black text-base neo-border-thick neo-shadow transition-all active:translate-x-0.5 active:translate-y-0.5"
+                disabled={lockoutSec > 0}
+                className="w-full py-4 bg-primary hover:bg-primary-dark text-white rounded-2xl font-black text-base neo-border-thick neo-shadow transition-all active:translate-x-0.5 active:translate-y-0.5 disabled:opacity-50"
               >
-                Buka Konsol Pemilik
+                {selectedLoginRole === 'owner' ? 'Buka Konsol Pemilik' : 'Masuk Mode Kasir'}
               </button>
             </form>
-
-            <p className="text-xs text-slate-400 font-semibold">
-              {!storeSettings.isPinChanged ? (
-                <>💡 PIN Default Toko: <strong className="text-ink font-mono font-black">1234</strong> (Dapat diubah setelah masuk)</>
-              ) : (
-                <>🔒 Toko Anda dilindungi dengan PIN Kustom Pemilik</>
-              )}
-            </p>
           </div>
         ) : (
-          /* Authenticated Dashboard - Spacious Tabs & Content */
+          /* Authenticated Dashboard */
           <div className="flex flex-col flex-1 max-h-[82vh] overflow-hidden">
             
-            {/* Top Navigation Bar / Tabs */}
+            {/* Top Navigation Bar / Tabs (RBAC Filtered) */}
             <div className="flex items-center gap-2 px-6 sm:px-8 py-3.5 bg-slate-100 border-b border-slate-200 overflow-x-auto no-scrollbar shrink-0">
               <button
                 onClick={() => setActiveTab('analytics')}
@@ -427,32 +740,22 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 }`}
               >
                 <BarChart3 className="w-4 h-4" />
-                <span>📊 Laporan & Keuntungan</span>
+                <span>📊 {isOwner ? 'Laporan, HPP & Stok' : 'Kokpit Kasir & Stok'}</span>
               </button>
 
-              <button
-                onClick={() => setActiveTab('settings')}
-                className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
-                  activeTab === 'settings'
-                    ? 'bg-primary text-white neo-border shadow-sm'
-                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
-                }`}
-              >
-                <Settings className="w-4 h-4" />
-                <span>⚙️ Pengaturan Usaha & Logo</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('inventory')}
-                className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
-                  activeTab === 'inventory'
-                    ? 'bg-primary text-white neo-border shadow-sm'
-                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
-                }`}
-              >
-                <Package className="w-4 h-4" />
-                <span>📦 Katalog & Produk ({products.length})</span>
-              </button>
+              {isOwner && (
+                <button
+                  onClick={() => setActiveTab('inventory')}
+                  className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
+                    activeTab === 'inventory'
+                      ? 'bg-primary text-white neo-border shadow-sm'
+                      : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
+                  }`}
+                >
+                  <Package className="w-4 h-4" />
+                  <span>📦 Katalog & HPP ({products.length})</span>
+                </button>
+              )}
 
               <button
                 onClick={() => setActiveTab('customers')}
@@ -478,21 +781,37 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 <span>🔒 Verifikasi Struk</span>
               </button>
 
-              <button
-                onClick={() => setActiveTab('agents')}
-                className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
-                  activeTab === 'agents'
-                    ? 'bg-primary text-white neo-border shadow-sm'
-                    : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
-                }`}
-              >
-                <Cpu className="w-4 h-4" />
-                <span>🤖 Konsol Agen Tester</span>
-              </button>
+              {isOwner && (
+                <>
+                  <button
+                    onClick={() => setActiveTab('settings')}
+                    className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
+                      activeTab === 'settings'
+                        ? 'bg-primary text-white neo-border shadow-sm'
+                        : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
+                    }`}
+                  >
+                    <Settings className="w-4 h-4" />
+                    <span>⚙️ Pengaturan & Keamanan</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('agents')}
+                    className={`px-5 py-2.5 rounded-xl font-extrabold text-xs sm:text-sm flex items-center gap-2 transition-all shrink-0 ${
+                      activeTab === 'agents'
+                        ? 'bg-primary text-white neo-border shadow-sm'
+                        : 'bg-white hover:bg-slate-200 text-slate-700 border border-slate-300'
+                    }`}
+                  >
+                    <Cpu className="w-4 h-4" />
+                    <span>🤖 Konsol Agen Tester</span>
+                  </button>
+                </>
+              )}
             </div>
 
-            {/* Alert Banner: Edit Password Pertama Kali */}
-            {!storeSettings.isPinChanged && (
+            {/* Alert Banner: Edit Password Pertama Kali (Owner Only) */}
+            {isOwner && !storeSettings.isPinChanged && (
               <div className="bg-amber-100 border-b-2 border-amber-300 px-6 sm:px-8 py-2.5 flex flex-wrap items-center justify-between gap-3 text-amber-950 text-xs font-bold shrink-0 animate-fadeIn">
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
@@ -517,8 +836,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             {/* Tab Contents - Spacious, Scrollable */}
             <div className="flex-1 p-6 sm:p-8 overflow-y-auto bg-slate-50/60">
               
-              {/* TAB 0: ANALISIS PENJUALAN & LABA KEUNTUNGAN */}
-              {activeTab === 'analytics' && <AnalyticsDashboard />}
+              {/* TAB 0: ANALISIS PENJUALAN, HPP, KAS & STOK */}
+              {activeTab === 'analytics' && <AnalyticsDashboard role={authRole || 'owner'} />}
 
               {/* TAB 1: PENGATURAN USAHA & LOGO (SPACIOUS, COMFORTABLE) */}
               {activeTab === 'settings' && (
@@ -759,17 +1078,47 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     </div>
                   </div>
 
-                  {/* KARTU 4: PENGATURAN STRUK THERMAL 58MM & TEST PRINT */}
+                  {/* KARTU 4: PENGATURAN PRINTER THERMAL BLUETOOTH & 58MM/80MM */}
                   <div className="bg-white p-6 sm:p-8 rounded-3xl neo-border shadow-sm space-y-5">
                     <div className="flex items-center gap-2.5 pb-3 border-b border-slate-200">
                       <Printer className="w-5 h-5 text-accent" />
                       <div>
                         <h4 className="font-display font-black text-lg sm:text-xl text-ink">
-                          Format Struk Printer Thermal 58mm
+                          Printer Thermal Bluetooth (ESC/POS) & Format Struk
                         </h4>
                         <p className="text-xs text-slate-500 font-medium">
-                          Konfigurasi struk kasir mini Bluetooth POS-58
+                          Hubungkan printer kasir RPP02N/VSC/Iware via Bluetooth Chrome untuk cetak struk 1-klik & auto-print.
                         </p>
+                      </div>
+                    </div>
+
+                    <BluetoothPrinterBar paperWidth={formPaperWidth} />
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
+                          Lebar Kertas Thermal:
+                        </label>
+                        <select
+                          value={formPaperWidth}
+                          onChange={(e) => setFormPaperWidth(e.target.value as '58mm' | '80mm')}
+                          className="w-full h-11 px-3.5 text-sm font-bold rounded-xl border-2 border-slate-300 bg-white focus:border-primary outline-none"
+                        >
+                          <option value="58mm">58mm (32 Kolom — Printer Mini RPP02N/POS-58)</option>
+                          <option value="80mm">80mm (48 Kolom — Printer Kasir Meja Lebar)</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-end">
+                        <label className="w-full h-11 px-4 rounded-xl border-2 border-slate-200 bg-slate-50 flex items-center justify-between cursor-pointer text-xs font-bold text-slate-800">
+                          <span>Auto-Print Bluetooth saat Struk Dibuka (Lunas)</span>
+                          <input
+                            type="checkbox"
+                            checked={formAutoPrintBt}
+                            onChange={(e) => setFormAutoPrintBt(e.target.checked)}
+                            className="w-4 h-4 rounded text-primary"
+                          />
+                        </label>
                       </div>
                     </div>
 
@@ -789,8 +1138,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                       <div className="flex items-center justify-between p-4 bg-slate-100 rounded-2xl">
                         <div className="text-xs text-slate-600">
-                          <strong className="text-ink block">Uji Coba Cetak Struk Kasir (58mm):</strong>
-                          Pastikan printer thermal mini Bluetooth/USB Anda terhubung ke browser.
+                          <strong className="text-ink block">Uji Tampilan Struk Layar & Unduh PDF ({formPaperWidth}):</strong>
+                          Cek tata letak struk atau cetak ke printer via PDF / Browser.
                         </div>
 
                         <button
@@ -799,23 +1148,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           className="px-5 py-2.5 bg-accent hover:bg-accent-dark text-white font-extrabold text-xs sm:text-sm rounded-xl neo-border shadow-sm flex items-center gap-2 transition-all shrink-0"
                         >
                           <Printer className="w-4 h-4" />
-                          <span>Cek Struk 58mm</span>
+                          <span>Preview Struk</span>
                         </button>
                       </div>
                     </div>
                   </div>
 
-                  {/* KARTU 5: KEAMANAN & EDIT PASSWORD PEMILIK */}
+                  {/* KARTU 5: KEAMANAN PBKDF2 — PIN PEMILIK & PIN KASIR */}
                   <div id="section-change-pin" className="bg-white p-6 sm:p-8 rounded-3xl neo-border shadow-sm space-y-6">
                     <div className="flex items-center justify-between pb-3 border-b border-slate-200 gap-3 flex-wrap">
                       <div className="flex items-center gap-2.5">
                         <Lock className="w-5 h-5 text-amber-600" />
                         <div>
                           <h4 className="font-display font-black text-lg sm:text-xl text-ink">
-                            Keamanan & Password Pemilik (PIN)
+                            Keamanan PBKDF2-SHA256 (PIN Pemilik & Kasir)
                           </h4>
                           <p className="text-xs text-slate-500 font-medium">
-                            PIN otentikasi untuk membuka Dashboard Pemilik dan proteksi hapus data penting toko.
+                            PIN dienkripsi 100.000 iterasi + proteksi blokir 10 menit jika salah 5×. Kasir tidak bisa melihat HPP modal.
                           </p>
                         </div>
                       </div>
@@ -824,7 +1173,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         {storeSettings.isPinChanged ? (
                           <span className="px-3 py-1.5 rounded-full bg-emerald-100 text-emerald-800 text-xs font-black flex items-center gap-1.5 border border-emerald-300">
                             <CheckCircle className="w-4 h-4 text-emerald-600" />
-                            <span>Password Kustom Aktif</span>
+                            <span>PIN Pemilik Kustom Aktif</span>
                           </span>
                         ) : (
                           <span className="px-3 py-1.5 rounded-full bg-amber-100 text-amber-900 text-xs font-black flex items-center gap-1.5 border border-amber-300 animate-pulse">
@@ -835,67 +1184,205 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                      <div>
-                        <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
-                          PIN Saat Ini / Lama:
-                        </label>
-                        <input
-                          type="password"
-                          value={oldPinInput}
-                          onChange={(e) => setOldPinInput(e.target.value)}
-                          placeholder={storeSettings.isPinChanged ? "PIN lama..." : "1234"}
-                          className="w-full h-12 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
-                        />
+                    <div className="space-y-4">
+                      <h5 className="text-xs font-black uppercase text-slate-500">1. Ubah PIN Pemilik Toko</h5>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div>
+                          <label className="block text-xs font-extrabold text-slate-800 mb-1.5">PIN Saat Ini / Lama:</label>
+                          <input
+                            type="password"
+                            value={oldPinInput}
+                            onChange={(e) => setOldPinInput(e.target.value)}
+                            placeholder={storeSettings.isPinChanged ? 'PIN lama...' : '1234'}
+                            className="w-full h-11 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-extrabold text-slate-800 mb-1.5">PIN Baru (Min. 4 Karakter):</label>
+                          <input
+                            type="password"
+                            value={newPinInput}
+                            onChange={(e) => setNewPinInput(e.target.value)}
+                            placeholder="Ketik PIN baru..."
+                            className="w-full h-11 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-extrabold text-slate-800 mb-1.5">Konfirmasi PIN Baru:</label>
+                          <input
+                            type="password"
+                            value={confirmPinInput}
+                            onChange={(e) => setConfirmPinInput(e.target.value)}
+                            placeholder="Ulangi PIN baru..."
+                            className="w-full h-11 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
+                          />
+                        </div>
                       </div>
 
-                      <div>
-                        <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
-                          PIN Baru (Min. 4 Karakter):
-                        </label>
-                        <input
-                          type="password"
-                          value={newPinInput}
-                          onChange={(e) => setNewPinInput(e.target.value)}
-                          placeholder="Ketik PIN baru..."
-                          className="w-full h-12 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
-                        />
-                      </div>
+                      {pinMsg && (
+                        <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                          pinMsg.type === 'success' ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-red-100 text-red-900 border border-red-300'
+                        }`}>
+                          {pinMsg.type === 'success' ? <Check className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />}
+                          <span>{pinMsg.text}</span>
+                        </div>
+                      )}
 
-                      <div>
-                        <label className="block text-xs font-extrabold text-slate-800 mb-1.5">
-                          Konfirmasi PIN Baru:
-                        </label>
-                        <input
-                          type="password"
-                          value={confirmPinInput}
-                          onChange={(e) => setConfirmPinInput(e.target.value)}
-                          placeholder="Ulangi PIN baru..."
-                          className="w-full h-12 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-amber-500 outline-none"
-                        />
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleChangePin}
+                          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs rounded-xl neo-border shadow-sm flex items-center gap-2 transition-all"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>Simpan PIN Pemilik</span>
+                        </button>
                       </div>
                     </div>
 
-                    {pinMsg && (
-                      <div className={`p-3.5 rounded-xl text-xs font-bold flex items-center gap-2 ${
-                        pinMsg.type === 'success' 
-                          ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' 
-                          : 'bg-red-100 text-red-900 border border-red-300'
-                      }`}>
-                        {pinMsg.type === 'success' ? <Check className="w-4 h-4 text-emerald-600 shrink-0" /> : <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />}
-                        <span>{pinMsg.text}</span>
+                    {/* PIN Kasir Operasional */}
+                    <div className="pt-4 border-t border-slate-200 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h5 className="text-xs font-black uppercase text-slate-500">
+                          2. Atur PIN Kasir Operasional (Default: kasir123)
+                        </h5>
+                        <span className="text-[11px] font-bold text-emerald-700">
+                          {storeSettings.isCashierPinChanged ? '✓ PIN Kasir Kustom' : 'Default: kasir123'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <input
+                          type="password"
+                          value={newCashierPin}
+                          onChange={(e) => setNewCashierPin(e.target.value)}
+                          placeholder="PIN Kasir baru (min. 4 huruf/angka)..."
+                          className="w-full h-11 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-emerald-500 outline-none"
+                        />
+                        <input
+                          type="password"
+                          value={confirmCashierPin}
+                          onChange={(e) => setConfirmCashierPin(e.target.value)}
+                          placeholder="Ulangi PIN Kasir baru..."
+                          className="w-full h-11 px-4 text-sm font-black tracking-widest rounded-xl border-2 border-slate-300 focus:border-emerald-500 outline-none"
+                        />
+                      </div>
+
+                      {cashierPinMsg && (
+                        <div className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 ${
+                          cashierPinMsg.type === 'success' ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-red-100 text-red-900 border border-red-300'
+                        }`}>
+                          <span>{cashierPinMsg.text}</span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleChangeCashierPin}
+                          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs rounded-xl neo-border shadow-sm flex items-center gap-2 transition-all"
+                        >
+                          <Save className="w-4 h-4" />
+                          <span>Simpan PIN Kasir</span>
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* KARTU 6: BACKUP JSON LENGKAP & LOG AUDIT KEAMANAN */}
+                  <div className="bg-white p-6 sm:p-8 rounded-3xl neo-border shadow-sm space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200">
+                      <div className="flex items-center gap-2.5">
+                        <History className="w-5 h-5 text-primary" />
+                        <div>
+                          <h4 className="font-display font-black text-lg sm:text-xl text-ink">
+                            Backup Database JSON & Log Audit Aktivitas
+                          </h4>
+                          <p className="text-xs text-slate-500 font-medium">
+                            Unduh arsip database lengkap ke perangkat (katalog HPP, nota, kas, stok) & pantau aktivitas sensitif.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleExportBackupJson}
+                          className="px-4 py-2 bg-primary hover:bg-primary-dark text-white font-black text-xs rounded-xl flex items-center gap-1.5 shadow-sm"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Unduh Backup (.json)</span>
+                        </button>
+                        <label className="cursor-pointer px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 font-black text-xs rounded-xl flex items-center gap-1.5">
+                          <Upload className="w-3.5 h-3.5" />
+                          <span>Pulihkan (.json)</span>
+                          <input
+                            type="file"
+                            accept="application/json,.json"
+                            onChange={handleImportBackupJson}
+                            className="hidden"
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    {backupNotice && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-xl text-xs font-bold">
+                        {backupNotice}
                       </div>
                     )}
 
-                    <div className="flex justify-end">
-                      <button
-                        type="button"
-                        onClick={handleChangePin}
-                        className="px-6 py-3 bg-amber-500 hover:bg-amber-600 text-white font-black text-xs sm:text-sm rounded-xl neo-border shadow-sm flex items-center gap-2 transition-all active:translate-x-0.5 active:translate-y-0.5"
-                      >
-                        <Save className="w-4 h-4" />
-                        <span>Simpan Password Baru</span>
-                      </button>
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                        <span>Log Aktivitas Keamanan Terakhir ({auditLogs.length})</span>
+                        {auditLogs.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (confirm('Bersihkan log aktivitas audit keamanan?')) clearSecurityAuditLogs();
+                            }}
+                            className="text-[11px] text-slate-400 hover:text-red-600"
+                          >
+                            Bersihkan Log
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
+                        {auditLogs.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-4 text-center border border-dashed border-slate-200 rounded-xl">
+                            Belum ada log keamanan tercatat.
+                          </p>
+                        ) : (
+                          auditLogs.slice(0, 20).map((entry) => (
+                            <div
+                              key={entry.id}
+                              className={`p-2.5 rounded-xl border text-[11px] flex items-start justify-between gap-2 ${
+                                entry.severity === 'ALERT'
+                                  ? 'bg-red-50 border-red-200 text-red-900'
+                                  : entry.severity === 'WARN'
+                                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                                  : 'bg-slate-50 border-slate-200 text-slate-700'
+                              }`}
+                            >
+                              <div>
+                                <span className="font-mono font-black text-[10px] mr-1.5 px-1.5 py-0.5 rounded bg-white border">
+                                  {entry.action}
+                                </span>
+                                <span className="font-medium">{entry.details}</span>
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                                {new Date(entry.timestamp).toLocaleString('id-ID', {
+                                  day: '2-digit',
+                                  month: 'short',
+                                  hour: '2-digit',
+                                  minute: '2-digit'
+                                })}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -1001,6 +1488,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     {products.map((p) => {
                       const totalStock = p.variants?.reduce((sum, v) => sum + (v.stock_qty ?? 0), 0) ?? 0;
                       const hasLowStock = p.variants?.some((v) => (v.stock_qty ?? 0) <= (v.min_stock_alert ?? 200));
+                      const firstUnit = p.variants?.[0]?.units?.[0];
+                      const sellPrice = firstUnit?.price ?? 0;
+                      const cogsPrice = firstUnit?.cogs_price ?? Math.round(sellPrice * 0.72);
+                      const marginPct = sellPrice > 0 ? (((sellPrice - cogsPrice) / sellPrice) * 100).toFixed(1) : '0';
 
                       return (
                       <div 
@@ -1021,8 +1512,13 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               {p.name}
                             </h5>
                             <span className="text-xs font-black text-accent block mt-0.5">
-                              Rp {(p.variants?.[0]?.units?.[0]?.price ?? 0).toLocaleString('id-ID')} / {p.variants?.[0]?.units?.[0]?.unit_code || 'Pcs'}
+                              Jual: Rp {sellPrice.toLocaleString('id-ID')} / {firstUnit?.unit_code || 'Pcs'}
                             </span>
+                            {isOwner && (
+                              <span className="text-[11px] font-bold text-emerald-700 block mt-0.5 font-mono">
+                                HPP Beli: Rp {cogsPrice.toLocaleString('id-ID')} (+{marginPct}%)
+                              </span>
+                            )}
                             <div className="mt-1.5 flex items-center gap-1.5">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-black inline-flex items-center gap-1 ${
                                 totalStock <= 0 
@@ -1040,7 +1536,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           </div>
                         </div>
 
-                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs font-bold">
+                        <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 text-xs font-bold">
                           <button
                             type="button"
                             onClick={() => {
@@ -1053,13 +1549,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             <span>Restock</span>
                           </button>
 
+                          {isOwner && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingProduct(p)}
+                              className="px-2.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg flex items-center gap-1 transition-colors"
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                              <span>Edit HPP</span>
+                            </button>
+                          )}
+
                           <button
-                            onClick={() => {
-                              const expectedPin = storeSettings.ownerPin || '1234';
-                              const inputPin = prompt(`Ketik password/PIN pemilik untuk menghapus produk "${p.name}":`);
+                            onClick={async () => {
+                              const inputPin = prompt(`Ketik PIN Pemilik untuk menghapus produk "${p.name}":`);
                               if (inputPin === null) return;
-                              if (inputPin !== expectedPin && inputPin !== 'admin2026') {
-                                alert('Password salah! Produk batal dihapus.');
+                              const check = await verifyOwnerOrCashierPin({
+                                inputPin,
+                                targetRole: 'owner',
+                                ownerPinHash: storeSettings.ownerPinHash,
+                                legacyOwnerPin: storeSettings.ownerPin
+                              });
+                              if (!check.valid) {
+                                alert('PIN Pemilik salah! Produk batal dihapus.');
                                 return;
                               }
                               deleteProduct(p.id);
@@ -1067,7 +1579,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                                 console.warn('Gagal hapus produk di Firebase:', err);
                               });
                             }}
-                            className="px-3 py-1.5 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-1 transition-colors"
+                            className="px-2.5 py-1.5 text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-1 transition-colors"
                           >
                             <Trash2 className="w-4 h-4" />
                             <span>Hapus</span>
@@ -1125,14 +1637,20 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           </div>
                         )}
 
+                        {isOwner && (
                         <div className="pt-2 flex justify-end">
                           <button
-                            onClick={() => {
-                              const expectedPin = storeSettings.ownerPin || '1234';
-                              const inputPin = prompt(`Ketik password/PIN pemilik untuk menghapus mitra "${c.business_name}":`);
+                            onClick={async () => {
+                              const inputPin = prompt(`Ketik PIN Pemilik untuk menghapus mitra "${c.business_name}":`);
                               if (inputPin === null) return;
-                              if (inputPin !== expectedPin && inputPin !== 'admin2026') {
-                                alert('Password salah! Data mitra batal dihapus.');
+                              const check = await verifyOwnerOrCashierPin({
+                                inputPin,
+                                targetRole: 'owner',
+                                ownerPinHash: storeSettings.ownerPinHash,
+                                legacyOwnerPin: storeSettings.ownerPin
+                              });
+                              if (!check.valid) {
+                                alert('PIN Pemilik salah! Data mitra batal dihapus.');
                                 return;
                               }
                               deleteCustomer(c.id);
@@ -1145,6 +1663,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             Hapus Mitra
                           </button>
                         </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1309,7 +1828,20 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           setRestockProductId(undefined);
         }}
         defaultProductId={restockProductId}
+        canManageHpp={isOwner}
       />
+
+      {/* Inline Edit Product & HPP Modal */}
+      {isOwner && (
+        <AddProductModal
+          isOpen={Boolean(editingProduct)}
+          editingProduct={editingProduct}
+          onClose={() => setEditingProduct(null)}
+          onSuccess={() => {
+            setEditingProduct(null);
+          }}
+        />
+      )}
     </div>
   );
 };

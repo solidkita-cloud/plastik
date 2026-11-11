@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 import { SalesOrder, OrderItemRecord, CartItem } from '../types';
+import { useCatalogStore, resolveUnitCogsPrice } from './catalogStore';
+import { logSecurityEvent } from '../lib/security';
 
 interface SalesState {
   orders: SalesOrder[];
   addOrder: (order: SalesOrder) => void;
   recordCheckoutOrder: (params: {
+    orderNumber?: string;
     items: CartItem[];
     customerName: string;
     customerPhone: string;
@@ -15,6 +18,8 @@ interface SalesState {
     dueDate?: string;
   }) => SalesOrder;
   recordPayment: (orderId: string, amount: number, method: 'cash' | 'transfer', notes?: string) => SalesOrder | null;
+  voidOrder: (orderId: string, reason: string, actorRole?: 'owner' | 'cashier') => SalesOrder | null;
+  incrementPrintCount: (orderNumber: string) => void;
   deleteOrder: (id: string) => void;
   clearAllOrders: () => void;
   resetToDemoOrders: () => void;
@@ -540,6 +545,7 @@ export const useSalesStore = create<SalesState>((set, get) => {
     },
 
     recordCheckoutOrder: ({ 
+      orderNumber,
       items, 
       customerName, 
       customerPhone, 
@@ -549,8 +555,15 @@ export const useSalesStore = create<SalesState>((set, get) => {
       paymentMethod = 'cash',
       dueDate
     }) => {
+      const catalogProducts = useCatalogStore.getState().products;
       const orderItems: OrderItemRecord[] = items.map((item) => {
-        const cogs = item.cogs_price ?? Math.round(item.price * 0.72);
+        const cogs = resolveUnitCogsPrice(
+          catalogProducts,
+          item.variant_id,
+          item.unit_id,
+          item.price,
+          item.cogs_price
+        );
         const subtotal = item.price * item.qty;
         const profit = (item.price - cogs) * item.qty;
         return {
@@ -561,6 +574,7 @@ export const useSalesStore = create<SalesState>((set, get) => {
           variant_name: item.variant_name,
           unit_code: item.unit_code,
           unit_name: item.unit_name,
+          base_multiplier: item.base_multiplier || 1,
           qty: item.qty,
           sell_price: item.price,
           cogs_price: cogs,
@@ -580,7 +594,7 @@ export const useSalesStore = create<SalesState>((set, get) => {
 
       const newOrder: SalesOrder = {
         id: `ord_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        order_number: `TP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        order_number: orderNumber || `TP-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
         created_at: new Date().toISOString(),
         customer_name: customerName.trim() || 'Pelanggan Umum',
         customer_phone: customerPhone.trim() || '-',
@@ -594,6 +608,8 @@ export const useSalesStore = create<SalesState>((set, get) => {
         profit_margin_pct: profitMarginPct,
         status: 'completed',
         source,
+        print_count: source === 'pos_thermal' ? 1 : 0,
+        last_printed_at: source === 'pos_thermal' ? new Date().toISOString() : undefined,
         payment_method: paymentMethod,
         payment_status: isTempo ? 'unpaid' : 'paid',
         due_date: isTempo ? defaultDueDate : undefined,
@@ -646,6 +662,58 @@ export const useSalesStore = create<SalesState>((set, get) => {
         return { orders: updated };
       });
       return updatedOrder;
+    },
+
+    voidOrder: (orderId, reason, actorRole = 'owner') => {
+      let voidedOrder: SalesOrder | null = null;
+      const target = get().orders.find((o) => o.id === orderId);
+      if (!target || target.status === 'cancelled') return null;
+
+      set((state) => {
+        const updated = state.orders.map((o) => {
+          if (o.id !== orderId) return o;
+          voidedOrder = {
+            ...o,
+            status: 'cancelled',
+            void_reason: reason.trim() || 'Dibatalkan oleh pemilik toko',
+            voided_at: new Date().toISOString(),
+            voided_by: actorRole
+          };
+          return voidedOrder;
+        });
+        saveOrders(updated);
+        return { orders: updated };
+      });
+
+      if (voidedOrder) {
+        useCatalogStore.getState().restoreStock(
+          target.items,
+          target.order_number,
+          reason.trim() || 'Nota dibatalkan (Void)'
+        );
+        logSecurityEvent(
+          'ORDER_VOIDED',
+          `Nota ${target.order_number} (Rp ${target.total_omzet.toLocaleString('id-ID')}) di-VOID (${actorRole}): ${reason}`,
+          'WARN'
+        );
+      }
+
+      return voidedOrder;
+    },
+
+    incrementPrintCount: (orderNumber) => {
+      set((state) => {
+        const updated = state.orders.map((o) => {
+          if (o.order_number !== orderNumber) return o;
+          return {
+            ...o,
+            print_count: (o.print_count || 0) + 1,
+            last_printed_at: new Date().toISOString()
+          };
+        });
+        saveOrders(updated);
+        return { orders: updated };
+      });
     },
 
     deleteOrder: (id) => {

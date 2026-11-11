@@ -64,6 +64,7 @@ export const VariantModal: React.FC<VariantModalProps> = ({ product, onClose, on
       base_multiplier: selectedUnit.base_multiplier,
       sku: selectedVariant.sku,
       price: selectedUnit.price,
+      cogs_price: selectedUnit.cogs_price,
       qty: quantity,
       weight_grams: (selectedVariant.base_pcs_weight_grams || 10) * selectedUnit.base_multiplier
     });

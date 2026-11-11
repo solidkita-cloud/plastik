@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   X, 
   Upload, 
@@ -7,25 +7,75 @@ import {
   Check, 
   Package, 
   Layers,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Pencil
 } from 'lucide-react';
 import { Product, ProductVariant, VariantUnit } from '../types';
 import { CATEGORIES } from '../lib/constants';
 import { useCatalogStore } from '../stores/catalogStore';
 import { saveProductToFirebase } from '../services/firebaseSync';
+import { logSecurityEvent } from '../lib/security';
 
 interface AddProductModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: (productName: string) => void;
+  editingProduct?: Product | null;
+}
+
+function createDefaultVariants(): ProductVariant[] {
+  const ts = Date.now();
+  return [
+    {
+      id: `var_${ts}_1`,
+      product_id: '',
+      name: 'Ukuran Standar',
+      sku: `SKU-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
+      dimension_detail: 'Standar Pabrik',
+      stock_status: 'ready',
+      stock_qty: 1500,
+      min_stock_alert: 200,
+      base_pcs_weight_grams: 10,
+      units: [
+        {
+          id: `u_${ts}_1`,
+          variant_id: '',
+          unit_code: 'PAK',
+          unit_name: 'Pack (Isi 50 pcs)',
+          base_multiplier: 50,
+          price: 50000,
+          cogs_price: 36000,
+          min_order_qty: 1,
+          step_qty: 1,
+          is_default: true,
+          badge_label: 'Paling Laris'
+        },
+        {
+          id: `u_${ts}_2`,
+          variant_id: '',
+          unit_code: 'DUS',
+          unit_name: 'Dus / Karton (Isi 1.000 pcs)',
+          base_multiplier: 1000,
+          price: 900000,
+          cogs_price: 680000,
+          min_order_qty: 1,
+          step_qty: 1,
+          is_default: false,
+          badge_label: 'Hemat Grosir'
+        }
+      ]
+    }
+  ];
 }
 
 export const AddProductModal: React.FC<AddProductModalProps> = ({
   isOpen,
   onClose,
-  onSuccess
+  onSuccess,
+  editingProduct
 }) => {
   const addProduct = useCatalogStore((state) => state.addProduct);
+  const updateProduct = useCatalogStore((state) => state.updateProduct);
 
   // Form Basic Info
   const [name, setName] = useState('');
@@ -39,45 +89,38 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
   const [imageUrl, setImageUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
   const [tagsInput, setTagsInput] = useState('Grosir, Best Seller, Food Grade');
+  const [variants, setVariants] = useState<ProductVariant[]>(createDefaultVariants);
 
-  // Dynamic Variants (Spacious default)
-  const [variants, setVariants] = useState<ProductVariant[]>([
-    {
-      id: `var_${Date.now()}_1`,
-      product_id: '',
-      name: 'Ukuran Standar',
-      sku: `SKU-${Math.random().toString(36).substring(2, 6).toUpperCase()}`,
-      dimension_detail: 'Standar Pabrik',
-      stock_status: 'ready',
-      base_pcs_weight_grams: 10,
-      units: [
-        {
-          id: `u_${Date.now()}_1`,
-          variant_id: '',
-          unit_code: 'PAK',
-          unit_name: 'Pack (Isi 50 pcs)',
-          base_multiplier: 50,
-          price: 50000,
-          min_order_qty: 1,
-          step_qty: 1,
-          is_default: true,
-          badge_label: 'Paling Laris'
-        },
-        {
-          id: `u_${Date.now()}_2`,
-          variant_id: '',
-          unit_code: 'DUS',
-          unit_name: 'Dus / Karton (Isi 1.000 pcs)',
-          base_multiplier: 1000,
-          price: 900000,
-          min_order_qty: 1,
-          step_qty: 1,
-          is_default: false,
-          badge_label: 'Hemat Grosir'
-        }
-      ]
+  useEffect(() => {
+    if (!isOpen) return;
+    if (editingProduct) {
+      setName(editingProduct.name);
+      setCategoryId(editingProduct.category_id);
+      setMaterial(editingProduct.material);
+      setFoodGrade(editingProduct.food_grade);
+      setMicrowaveSafe(editingProduct.microwave_safe);
+      setFreezerSafe(editingProduct.freezer_safe);
+      setDescription(editingProduct.description || '');
+      setBadge(editingProduct.badge || '');
+      setImageUrl(editingProduct.image_url || '');
+      setImagePreview(editingProduct.image_url || '');
+      setTagsInput((editingProduct.tags || []).join(', '));
+      setVariants(JSON.parse(JSON.stringify(editingProduct.variants || createDefaultVariants())));
+    } else {
+      setName('');
+      setCategoryId('cat_cup');
+      setMaterial('PP');
+      setFoodGrade(true);
+      setMicrowaveSafe(false);
+      setFreezerSafe(true);
+      setDescription('');
+      setBadge('Best Seller');
+      setImageUrl('');
+      setImagePreview('');
+      setTagsInput('Grosir, Best Seller, Food Grade');
+      setVariants(createDefaultVariants());
     }
-  ]);
+  }, [isOpen, editingProduct]);
 
   if (!isOpen) return null;
 
@@ -168,20 +211,27 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       return;
     }
 
-    const productId = `prod_${Date.now()}`;
+    const isEditing = Boolean(editingProduct);
+    const productId = editingProduct ? editingProduct.id : `prod_${Date.now()}`;
     const cleanTags = tagsInput.split(',').map((t) => t.trim()).filter(Boolean);
 
     // Default clean packaging placeholder image if empty
     const finalImage = imageUrl.trim() || '/products/cup-16oz.jpg';
 
-    // Format variants with product id
+    // Format variants with product id & resolved HPP
     const finalVariants = variants.map((v) => ({
       ...v,
       product_id: productId,
-      units: v.units.map((u) => ({ ...u, variant_id: v.id }))
+      stock_qty: v.stock_qty ?? 1500,
+      min_stock_alert: v.min_stock_alert ?? 200,
+      units: v.units.map((u) => ({
+        ...u,
+        variant_id: v.id,
+        cogs_price: u.cogs_price && u.cogs_price > 0 ? Math.round(u.cogs_price) : Math.round(u.price * 0.72)
+      }))
     }));
 
-    const newProduct: Product = {
+    const productPayload: Product = {
       id: productId,
       name: name.trim(),
       category_id: categoryId,
@@ -192,16 +242,22 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
       description: description.trim() || 'Produk kemasan berkualitas standar food grade pabrik.',
       image_url: finalImage,
       tags: cleanTags,
-      is_featured: true,
+      is_featured: editingProduct ? editingProduct.is_featured : true,
       badge: badge ? badge : undefined,
       variants: finalVariants
     };
 
-    addProduct(newProduct);
-    saveProductToFirebase(newProduct).catch((err) => {
+    if (isEditing) {
+      updateProduct(productPayload);
+      logSecurityEvent('HPP_UPDATED', `Produk "${productPayload.name}" & harga HPP/Jual diperbarui.`, 'INFO');
+    } else {
+      addProduct(productPayload);
+    }
+
+    saveProductToFirebase(productPayload).catch((err) => {
       console.warn('Gagal sync produk ke Firebase:', err);
     });
-    onSuccess(newProduct.name);
+    onSuccess(productPayload.name);
     onClose();
   };
 
@@ -215,15 +271,17 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
         {/* Header - Spacious with Clear Contrast */}
         <div className="px-6 py-5 sm:px-8 border-b-2 border-ink bg-slate-100 flex items-center justify-between">
           <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-2xl bg-primary text-white flex items-center justify-center neo-border shadow-sm">
-              <Plus className="w-6 h-6" />
+            <div className={`w-11 h-11 rounded-2xl text-white flex items-center justify-center neo-border shadow-sm ${
+              editingProduct ? 'bg-amber-500' : 'bg-primary'
+            }`}>
+              {editingProduct ? <Pencil className="w-5 h-5" /> : <Plus className="w-6 h-6" />}
             </div>
             <div>
               <h3 className="font-display font-black text-xl sm:text-2xl text-ink">
-                Tambah Produk Baru ke Katalog
+                {editingProduct ? `Edit Produk & HPP: ${editingProduct.name}` : 'Tambah Produk Baru ke Katalog'}
               </h3>
               <p className="text-xs sm:text-sm text-slate-500 font-medium">
-                Formulir lapang & lengkap: identitas, foto produk, varian & multi-tier satuan harga (Pcs / Pak / Dus)
+                Atur identitas, foto produk, varian stok, dan perbandingan HPP Beli vs Harga Jual per satuan (Pcs / Pak / Dus)
               </p>
             </div>
           </div>
@@ -565,11 +623,47 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Stok & Minimum Alert Fields */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-white p-3.5 rounded-xl border border-slate-200">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        Stok Fisik Saat Ini (Satuan Dasar / Pcs)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={v.stock_qty ?? 1500}
+                        onChange={(e) => {
+                          const updated = [...variants];
+                          updated[vIdx].stock_qty = Math.max(0, Number(e.target.value) || 0);
+                          setVariants(updated);
+                        }}
+                        className="w-full h-10 px-3 text-sm font-black font-mono rounded-lg border border-slate-300 focus:border-primary outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold text-amber-800 mb-1">
+                        Batas Peringatan Stok Menipis (Pcs)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={v.min_stock_alert ?? 200}
+                        onChange={(e) => {
+                          const updated = [...variants];
+                          updated[vIdx].min_stock_alert = Math.max(0, Number(e.target.value) || 0);
+                          setVariants(updated);
+                        }}
+                        className="w-full h-10 px-3 text-sm font-black font-mono rounded-lg border border-amber-300 bg-amber-50/40 focus:border-amber-500 outline-none"
+                      />
+                    </div>
+                  </div>
+
                   {/* Units Table for this variant */}
                   <div className="pt-2 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-black uppercase tracking-wider text-slate-600">
-                        Harga & Satuan Jual Bertingkat (Pcs / Pak / Dus):
+                        HPP Beli vs Harga Jual per Satuan (Pcs / Pak / Dus):
                       </span>
                       <button
                         type="button"
@@ -582,11 +676,18 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                     </div>
 
                     <div className="space-y-3">
-                      {v.units.map((u, uIdx) => (
+                      {v.units.map((u, uIdx) => {
+                        const effectiveCogs = u.cogs_price && u.cogs_price > 0 ? u.cogs_price : Math.round(u.price * 0.72);
+                        const unitProfit = u.price - effectiveCogs;
+                        const unitMarginPct = u.price > 0 ? ((unitProfit / u.price) * 100).toFixed(1) : '0';
+                        const isLoss = u.cogs_price && u.cogs_price >= u.price;
+
+                        return (
                         <div 
                           key={u.id}
-                          className="p-4 bg-white rounded-xl border border-slate-200 grid grid-cols-1 sm:grid-cols-12 gap-3 items-center shadow-sm"
+                          className="p-4 bg-white rounded-xl border border-slate-200 space-y-2.5 shadow-sm"
                         >
+                        <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
                           <div className="sm:col-span-2">
                             <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
                               Satuan:
@@ -645,7 +746,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
 
                           <div className="sm:col-span-2">
                             <label className="block text-[11px] font-bold text-slate-500 mb-0.5">
-                              Harga Jual:
+                              Harga Jual (Rp):
                             </label>
                             <input
                               type="number"
@@ -662,8 +763,8 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                           </div>
 
                           <div className="sm:col-span-2">
-                            <label className="block text-[11px] font-bold text-emerald-700 mb-0.5" title="Harga Beli dari Pabrik">
-                              Modal HPP:
+                            <label className="block text-[11px] font-bold text-emerald-700 mb-0.5" title="Harga Beli / Kulakan dari Pabrik">
+                              HPP Beli (Rp):
                             </label>
                             <input
                               type="number"
@@ -691,7 +792,27 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
                             </button>
                           </div>
                         </div>
-                      ))}
+
+                        {/* Live Margin & Profit Preview Bar */}
+                        <div className={`px-3 py-1.5 rounded-lg text-[11px] font-bold flex flex-wrap items-center justify-between gap-2 ${
+                          isLoss
+                            ? 'bg-red-50 text-red-700 border border-red-200'
+                            : Number(unitMarginPct) < 15
+                            ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                            : 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                        }`}>
+                          <span>
+                            HPP Beli: <strong>Rp {effectiveCogs.toLocaleString('id-ID')}</strong> vs Jual: <strong>Rp {u.price.toLocaleString('id-ID')}</strong>
+                          </span>
+                          <span>
+                            {isLoss
+                              ? `⚠️ HPP >= Harga Jual (Selisih: Rp ${unitProfit.toLocaleString('id-ID')})`
+                              : `Untung Bersih/Satuan: +Rp ${unitProfit.toLocaleString('id-ID')} (Margin ${unitMarginPct}%)`}
+                          </span>
+                        </div>
+                        </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -715,7 +836,7 @@ export const AddProductModal: React.FC<AddProductModalProps> = ({
               className="w-full sm:w-auto px-9 py-4 bg-primary hover:bg-primary-dark text-white font-black text-sm sm:text-base rounded-2xl neo-border-thick neo-shadow transition-all flex items-center justify-center gap-2 active:translate-x-0.5 active:translate-y-0.5"
             >
               <Check className="w-5 h-5" />
-              <span>Simpan Produk ke Katalog</span>
+              <span>{editingProduct ? 'Simpan Perubahan Produk & HPP' : 'Simpan Produk ke Katalog'}</span>
             </button>
           </div>
 

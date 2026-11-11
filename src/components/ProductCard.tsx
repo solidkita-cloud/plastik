@@ -36,6 +36,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, onOpenModal, 
       base_multiplier: defaultUnit.base_multiplier,
       sku: defaultVariant.sku,
       price: defaultUnit.price,
+      cogs_price: defaultUnit.cogs_price,
       qty: 1,
       weight_grams: (defaultVariant.base_pcs_weight_grams || 10) * defaultUnit.base_multiplier
     });

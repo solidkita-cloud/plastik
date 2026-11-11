@@ -8,8 +8,9 @@ import {
   getDocs
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { useSettingsStore, StoreSettings } from '../stores/settingsStore';
-import { useCatalogStore } from '../stores/catalogStore';
+import { initCatalogIndex } from '../lib/catalogDb';
+import { useSettingsStore, StoreSettings, sanitizeSettingsForCloud } from '../stores/settingsStore';
+import { useCatalogStore, normalizeProductData } from '../stores/catalogStore';
 import { useCustomerStore } from '../stores/customerStore';
 import { useSalesStore } from '../stores/salesStore';
 import { useExpenseStore } from '../stores/expenseStore';
@@ -39,7 +40,15 @@ export function startFirebaseRealtimeSync(onStatusChange?: (status: {
     unsubscribeSettings = onSnapshot(settingsRef, (snapshot) => {
       if (snapshot.exists()) {
         const cloudData = snapshot.data() as Partial<StoreSettings>;
-        useSettingsStore.getState().updateSettings(cloudData);
+        const safeUpdate = { ...cloudData };
+        // Jangan biarkan dokumen cloud lama menimpa hash PBKDF2 lokal yang sudah diamankan
+        if (!safeUpdate.ownerPinHash) {
+          delete safeUpdate.ownerPinHash;
+        }
+        if (!safeUpdate.cashierPinHash) {
+          delete safeUpdate.cashierPinHash;
+        }
+        useSettingsStore.getState().updateSettings(safeUpdate);
         onStatusChange?.({
           connected: true,
           message: 'Pengaturan toko sinkron dari Cloud',
@@ -60,11 +69,12 @@ export function startFirebaseRealtimeSync(onStatusChange?: (status: {
       if (!snapshot.empty) {
         const cloudProducts: Product[] = [];
         snapshot.forEach((docSnap) => {
-          cloudProducts.push(docSnap.data() as Product);
+          cloudProducts.push(normalizeProductData(docSnap.data() as Product));
         });
 
         if (cloudProducts.length > 0) {
           useCatalogStore.setState({ products: cloudProducts });
+          initCatalogIndex(cloudProducts);
           localStorage.setItem('plastipro_custom_catalog_v2', JSON.stringify(cloudProducts));
         }
       }
@@ -150,8 +160,8 @@ export function stopFirebaseRealtimeSync() {
 export async function saveSettingsToFirebase(settings: Partial<StoreSettings>): Promise<boolean> {
   try {
     const settingsRef = doc(db, 'settings', 'general');
-    // Bersihkan nilai undefined jika ada
-    const cleanData = JSON.parse(JSON.stringify(settings));
+    // Hapus plaintext ownerPin sebelum dikirim ke Cloud
+    const cleanData = sanitizeSettingsForCloud(settings);
     await setDoc(settingsRef, cleanData, { merge: true });
     return true;
   } catch (error) {
@@ -331,10 +341,14 @@ export async function uploadAllLocalDataToFirebase(): Promise<{
       email: currentSettings.email,
       logoUrl: currentSettings.logoUrl,
       thermalFooterNote: currentSettings.thermalFooterNote,
-      ownerPin: currentSettings.ownerPin || '1234',
-      isPinChanged: Boolean(currentSettings.isPinChanged)
+      ownerPinHash: currentSettings.ownerPinHash,
+      cashierPinHash: currentSettings.cashierPinHash,
+      isPinChanged: Boolean(currentSettings.isPinChanged),
+      isCashierPinChanged: Boolean(currentSettings.isCashierPinChanged),
+      printerPaperWidth: currentSettings.printerPaperWidth || '58mm',
+      autoPrintBluetooth: Boolean(currentSettings.autoPrintBluetooth)
     };
-    await setDoc(settingsRef, JSON.parse(JSON.stringify(settingsPayload)), { merge: true });
+    await setDoc(settingsRef, sanitizeSettingsForCloud(settingsPayload), { merge: true });
 
     // 2. Upload products in batch
     const batch = writeBatch(db);
