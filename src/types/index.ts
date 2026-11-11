@@ -145,6 +145,8 @@ export interface SalesOrder {
   due_date?: string; // Tanggal jatuh tempo
   amount_paid?: number; // Total nominal yang sudah dibayar
   remaining_balance?: number; // Sisa tagihan piutang
+  cash_received?: number; // Uang tunai diterima di kasir
+  cash_change?: number; // Uang kembalian tunai
   payment_history?: SalesOrderPayment[];
 }
 

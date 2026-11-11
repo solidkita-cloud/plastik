@@ -16,6 +16,8 @@ interface SalesState {
     source: 'whatsapp_checkout' | 'pos_thermal' | 'qr_reorder';
     paymentMethod?: 'cash' | 'transfer' | 'tempo';
     dueDate?: string;
+    cashReceived?: number;
+    cashChange?: number;
   }) => SalesOrder;
   recordPayment: (orderId: string, amount: number, method: 'cash' | 'transfer', notes?: string) => SalesOrder | null;
   voidOrder: (orderId: string, reason: string, actorRole?: 'owner' | 'cashier') => SalesOrder | null;
@@ -553,7 +555,9 @@ export const useSalesStore = create<SalesState>((set, get) => {
       deliveryMethod, 
       source,
       paymentMethod = 'cash',
-      dueDate
+      dueDate,
+      cashReceived,
+      cashChange
     }) => {
       const catalogProducts = useCatalogStore.getState().products;
       const orderItems: OrderItemRecord[] = items.map((item) => {
@@ -615,6 +619,8 @@ export const useSalesStore = create<SalesState>((set, get) => {
         due_date: isTempo ? defaultDueDate : undefined,
         amount_paid: isTempo ? 0 : totalOmzet,
         remaining_balance: isTempo ? totalOmzet : 0,
+        cash_received: cashReceived,
+        cash_change: cashChange,
         payment_history: !isTempo ? [
           {
             id: `pay_${Date.now()}`,

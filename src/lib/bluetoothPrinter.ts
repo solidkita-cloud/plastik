@@ -545,6 +545,8 @@ export interface PlastikReceiptPayload {
   paymentStatus?: 'paid' | 'unpaid' | 'partial';
   amountPaid?: number;
   remainingBalance?: number;
+  cashReceived?: number;
+  cashChange?: number;
   dueDate?: string;
   printCount?: number;
   isVoided?: boolean;
@@ -656,6 +658,11 @@ export function buildPlastikReceiptBytes(
   b.twoColumns('TOTAL:', `Rp ${data.subtotal.toLocaleString('id-ID')}`, width);
   b.sizeNormal().bold(false);
 
+  if (data.paymentMethod === 'cash' && data.cashReceived !== undefined && data.cashReceived > 0) {
+    b.twoColumns('Tunai Bayar:', `Rp ${data.cashReceived.toLocaleString('id-ID')}`, width);
+    b.bold(true).twoColumns('Kembalian  :', `Rp ${(data.cashChange || 0).toLocaleString('id-ID')}`, width).bold(false);
+  }
+
   if (data.paymentMethod === 'tempo') {
     const paid = data.amountPaid || 0;
     const remain = data.remainingBalance ?? Math.max(0, data.subtotal - paid);
@@ -760,6 +767,8 @@ export function salesOrderToReceiptPayload(
     paymentStatus: order.payment_status,
     amountPaid: order.amount_paid,
     remainingBalance: order.remaining_balance,
+    cashReceived: order.cash_received,
+    cashChange: order.cash_change,
     dueDate: order.due_date,
     printCount: order.print_count,
     isVoided: order.status === 'cancelled',

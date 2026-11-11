@@ -26,6 +26,8 @@ interface ThermalReceiptModalProps {
   cashierName?: string;
   paymentMethod?: 'cash' | 'transfer' | 'tempo';
   dueDate?: string;
+  cashReceived?: number;
+  cashChange?: number;
 }
 
 export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
@@ -42,7 +44,9 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
   verificationCode,
   cashierName = 'Kasir Toko',
   paymentMethod = 'cash',
-  dueDate
+  dueDate,
+  cashReceived,
+  cashChange
 }) => {
   const storeSettings = useSettingsStore();
   const incrementPrintCount = useSalesStore((s) => s.incrementPrintCount);
@@ -77,7 +81,9 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
           dateStr: nowFormatted,
           paymentMethod,
           paymentStatus: paymentMethod === 'tempo' ? 'unpaid' : 'paid',
-          dueDate
+          dueDate,
+          cashReceived,
+          cashChange
         },
         storeSettings
       );
@@ -112,7 +118,9 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
       verificationCode,
       storeSettings,
       cashierName,
-      date: nowFormatted
+      date: nowFormatted,
+      cashReceived,
+      cashChange
     });
   };
 
@@ -251,6 +259,18 @@ export const ThermalReceiptModal: React.FC<ThermalReceiptModalProps> = ({
                 <span>TOTAL:</span>
                 <span>Rp {subtotal.toLocaleString('id-ID')}</span>
               </div>
+              {paymentMethod === 'cash' && cashReceived !== undefined && cashReceived > 0 && (
+                <>
+                  <div className="flex justify-between text-slate-700 pt-1">
+                    <span>Tunai Diterima:</span>
+                    <span>Rp {cashReceived.toLocaleString('id-ID')}</span>
+                  </div>
+                  <div className="flex justify-between font-bold text-slate-900">
+                    <span>Kembalian:</span>
+                    <span>Rp {(cashChange || 0).toLocaleString('id-ID')}</span>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Verification Code */}

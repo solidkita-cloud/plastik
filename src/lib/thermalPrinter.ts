@@ -15,13 +15,16 @@ export interface ThermalReceiptData {
   storeSettings: StoreSettings;
   cashierName?: string;
   date?: string;
+  cashReceived?: number;
+  cashChange?: number;
 }
 
 export function generateThermalReceiptPDF(data: ThermalReceiptData) {
   // Calculate dynamic height based on number of items
   // Base header (45mm) + items (8mm each) + totals & verification (35mm) + footer (20mm)
   const itemHeight = data.items.length * 8.5;
-  const calculatedHeight = Math.max(130, 85 + itemHeight);
+  const extraHeight = data.cashReceived ? 10 : 0;
+  const calculatedHeight = Math.max(130, 85 + itemHeight + extraHeight);
 
   const doc = new jsPDF({
     orientation: 'portrait',
@@ -123,6 +126,19 @@ export function generateThermalReceiptPDF(data: ThermalReceiptData) {
   doc.text('TOTAL :', 4, y);
   doc.text(`Rp ${data.subtotal.toLocaleString('id-ID')}`, 54, y, { align: 'right' });
   y += 4.5;
+
+  if (data.cashReceived !== undefined && data.cashReceived > 0) {
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(7.5);
+    doc.text('Tunai :', 4, y);
+    doc.text(`Rp ${data.cashReceived.toLocaleString('id-ID')}`, 54, y, { align: 'right' });
+    y += 3.5;
+
+    doc.setFont('courier', 'bold');
+    doc.text('Kembali :', 4, y);
+    doc.text(`Rp ${(data.cashChange || 0).toLocaleString('id-ID')}`, 54, y, { align: 'right' });
+    y += 4;
+  }
 
   // Divider
   doc.setFont('courier', 'normal');
